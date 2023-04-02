@@ -19,7 +19,7 @@ type KeyValue struct {
 type WorkerState struct {
 	l sync.Mutex
 	vaild bool
-	wId int
+	wId int64
 	jobType int 
 	file string 
 	reduceId int

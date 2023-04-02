@@ -24,7 +24,7 @@ type JobRequest struct {
 type JobReply struct {
 	vaild bool
 	exit bool
-	wId int
+	wId int64
 	jobType int 
 	file string 
 	reduceId int
@@ -33,7 +33,7 @@ type JobReply struct {
 }
 
 type HeartBeat struct {
-	wid int
+	wid int64
 	sendTime int64
 }
 
@@ -44,7 +44,7 @@ type HeartBeatReply struct {
 }
 
 type JobCompleteSig struct {
-	wId int
+	wId int64
 	jobType int 
 	mapFile string 
 	reduceId int

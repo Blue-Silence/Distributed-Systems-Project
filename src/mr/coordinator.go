@@ -50,7 +50,8 @@ func MakeCoordinator(files []string, nReduce int) *Coordinator {
 	c := Coordinator{}
 	c.mapInputFiles = make(map[string]*Job)
 	c.reduceInputFiles = make([]Job,nReduce)
-	c.workers = make([]WorkerStat,0)
+	c.workers.lt = make(map[int64]*WorkerStat,0)
+	c.workers.counter = 0
 	for _, fname := range files {
 		var a Job
 		a.complete = false
@@ -101,7 +102,7 @@ const (
 
 
 type WorkerStat struct {
-	wId int 
+	wId int64 
 	startT int64 //time.Time 
 	lastHeartBeat int64 //time.Time
 	state int
@@ -113,6 +114,8 @@ type Job struct {
 	jobType int
 
 	file string
+	fileId int64
+
 	reduceId int
 
 	w *WorkerStat
@@ -121,12 +124,17 @@ type Job struct {
 	vaild bool
 }
 
+type WorkerLst struct {
+	counter int64 
+	lt map[int64]*WorkerStat
+}
+
 type Coordinator struct {
 	// Your definitions here.
 	mapInputFiles map[string]*Job
 	//mapOuputFiles [][]string
 	reduceInputFiles []Job
-	workers []WorkerStat
+	workers WorkerLst
 	jobType int
 	l sync.Mutex
 
@@ -176,16 +184,22 @@ func (c *Coordinator) GetJob(args *JobRequest, reply *JobReply) error {
 
 func (c *Coordinator) MkHeartBeat(args *HeartBeat, reply *HeartBeatReply) error {
 
-	c.workers[args.wid].l.Lock()
+	c.l.Lock()
+	w := c.workers.lt[args.wid] //[args.wid].l.Lock()
+	if w == nil {
+		reply.state = Killed
+		c.l.Unlock()
+		return nil
+	}
+	c.l.Unlock()
+	w.l.Lock()
 	switch {
-		case !c.workers[args.wid].vaild :
+		case !w.vaild :
 			reply.state = Killed 
-		case c.workers[args.wid].startT >= args.sendTime :
-			reply.state = Killed
 		default :
 			reply.lease = workerLifeTimeOnWorker
 			reply.lastHeartBeatT = time.Now().Unix()
-			if (c.workers[args.wid].lastHeartBeat + workerLifeTimeOnServer<time.Now().Unix()) {
+			if (w.lastHeartBeat + workerLifeTimeOnServer<time.Now().Unix()) {
 				reply.state = Killed
 			} else {
 				reply.state = Running
@@ -207,6 +221,7 @@ func (c *Coordinator) FinishJob(args *JobCompleteSig, reply *int) error {
 
 	j.l.Lock()
 	j.complete = true
+	j.fileId = args.wId
 	j.w.l.Lock()
 	j.w.state = Killed 
 	j.w.l.Unlock()
@@ -221,20 +236,14 @@ func (c *Coordinator) FinishJob(args *JobCompleteSig, reply *int) error {
 func  getFreeWID(c *Coordinator) *WorkerStat {
 	defer c.l.Unlock()
 	c.l.Lock()
-	i := 0
-	for _,_ = range c.workers {
-		i++
-		w := &c.workers[i]
-		w.l.Lock()
-		if(!w.vaild || timeExpire(w)){
-			return w
-		}
-	}
 
-	c.workers = append(c.workers, WorkerStat{})
-	c.workers[i].l.Lock()
-	c.workers[i].wId = i 
-	return &c.workers[i]
+	ws := c.workers
+	w := WorkerStat{wId : ws.counter}
+	w.l.Lock()
+	ws.lt[ws.counter] = &w 
+	ws.counter++
+
+	return &w
 }
 
 func  initWorker(w *WorkerStat) {
@@ -299,4 +308,20 @@ func  forwardStat(c *Coordinator, currentState int) {
 		c.jobType = currentState+1
 	}
 
+}
+
+func cleaning(c *Coordinator) {
+	for {
+		c.l.Lock()
+		ws := &c.workers.lt  
+		for id,w := range *ws {
+			w.l.Lock()
+			if (!w.vaild || timeExpire(w)) {
+				delete(*ws,id)
+			}
+			w.l.Unlock()
+		}
+		time.Sleep(time.Duration(workerLifeTimeOnServer*2) * time.Second)
+
+	}
 }
