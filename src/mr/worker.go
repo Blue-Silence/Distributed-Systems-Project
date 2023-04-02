@@ -5,6 +5,8 @@ import "log"
 import "net/rpc"
 import "hash/fnv"
 
+import "sync"
+import "time"
 
 //
 // Map functions return a slice of KeyValue.
@@ -15,6 +17,7 @@ type KeyValue struct {
 }
 
 type WorkerState struct {
+	l sync.Mutex
 	vaild bool
 	wId int
 	jobType int 
@@ -53,6 +56,7 @@ func Worker(mapf func(string, string) []KeyValue,
 		var state WorkerState
 		var heartBeatChan chan int 
 		//var finishChan chan int 
+		go mkHearBeat(&state, heartBeatChan)
 		switch state.getJob(heartBeatChan){
 			case WEmptyJob :
 				continue 
@@ -135,6 +139,7 @@ func (w *WorkerState) getJob(c chan int) int {
 			case reply.vaild == false :
 				return WEmptyJob
 			case reply.exit :
+				c <- 0
 				return WExit
 			default : 
 				w.vaild = reply.vaild
@@ -144,7 +149,7 @@ func (w *WorkerState) getJob(c chan int) int {
 				w.reduceId = reply.reduceId
 				w.lastHeartBeatT = reply.startT 
 				w.lease = reply.lease
-				go mkHearBeat(w, c)
+				c <- 1
 				return WNormal
 		}
 	} else {
@@ -153,5 +158,35 @@ func (w *WorkerState) getJob(c chan int) int {
 }
 
 func mkHearBeat(w *WorkerState, c chan int) {
-	// TO BE DONE
+	
+
+	var args HeartBeat
+	var reply HeartBeatReply
+	var a int 
+	for {
+
+		w.l.Lock()
+		for (!w.vaild) {
+			w.l.Unlock()
+			a = <- c 
+			if(a == 0) {
+				return
+			}
+			w.l.Lock()
+		}	
+		args = HeartBeat{wid : w.wId, sendTime: time.Now().Unix()}
+		ok := call("Coordinator.GetJob", &args, &reply)
+		switch {
+			case !ok :
+				w.vaild = false
+			case reply.state == Killed || reply.state == Exit :
+				w.vaild = false
+			default :
+				w.lastHeartBeatT = reply.lastHeartBeatT
+				w.lease = reply.lease
+				w.l.Unlock()
+				time.Sleep(time.Duration((w.lease-(time.Now().Unix()-w.lastHeartBeatT))/2) * time.Second)
+		}
+		
+	}
 }
