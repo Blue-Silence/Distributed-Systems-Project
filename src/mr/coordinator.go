@@ -88,16 +88,15 @@ const workerLifeTimeOnServer int64 = 12
 const workerLifeTimeOnWorker int64 = 10
 
 const (
-	Idle int	= 0
-	Running		= 1
-	Down		= 2
-	Finished	= 3
+	Running		= 0
+	Killed		= 1
+	Exit		= 2
 )
 
 const (
 	JMap int	= 0
-	JReduce		= 1
-	JDone		= 2
+	JReduce		= JMap+1
+	JDone		= JReduce+1
 )
 
 
@@ -135,6 +134,7 @@ type Coordinator struct {
 
 func (c *Coordinator) GetJob(args *JobRequest, reply *JobReply) error {
 	reply.vaild = true
+	reply.exit = false
 	c.l.Lock()
 	jobType := c.jobType
 	c.l.Unlock()
@@ -146,6 +146,7 @@ func (c *Coordinator) GetJob(args *JobRequest, reply *JobReply) error {
 			job = getFreeReduceJ(&c.reduceInputFiles)
 		case JDone:
 			reply.vaild = false
+			reply.exit = true
 	}
 
 	switch {
@@ -166,7 +167,7 @@ func (c *Coordinator) GetJob(args *JobRequest, reply *JobReply) error {
 			job.l.Unlock()
 		case !reply.vaild : 
 		case job == nil : 
-			refreshStat(c)
+			forwardStat(c, jobType)
 		default :
 	}
 		return nil
@@ -174,12 +175,45 @@ func (c *Coordinator) GetJob(args *JobRequest, reply *JobReply) error {
 }
 
 func (c *Coordinator) MkHeartBeat(args *HeartBeat, reply *HeartBeatReply) error {
-	//reply.Y = args.X + 1
+
+	c.workers[args.wid].l.Lock()
+	switch {
+		case !c.workers[args.wid].vaild :
+			reply.state = Killed 
+		case c.workers[args.wid].startT >= args.sendTime :
+			reply.state = Killed
+		default :
+			reply.lease = workerLifeTimeOnWorker
+			reply.lastHeartBeatT = time.Now().Unix()
+			if (c.workers[args.wid].lastHeartBeat + workerLifeTimeOnServer<time.Now().Unix()) {
+				reply.state = Killed
+			} else {
+				reply.state = Running
+			}
+	}
+
 	return nil
 }
 
 func (c *Coordinator) FinishJob(args *JobCompleteSig, reply *int) error {
 	//reply.Y = args.X + 1
+	var j *Job
+	switch args.jobType {
+		case JMap :
+			j = c.mapInputFiles[args.mapFile]
+		case JReduce:
+			j = &c.reduceInputFiles[args.reduceId]
+		}
+
+	j.l.Lock()
+	j.complete = true
+	j.w.l.Lock()
+	j.w.state = Killed 
+	j.w.l.Unlock()
+	j.l.Unlock()
+
+	*reply = 0
+	
 	return nil
 }
 
@@ -256,4 +290,13 @@ func  getFreeReduceJ(m *[]Job) *Job {
 	}
 
 	return nil
+}
+
+func  forwardStat(c *Coordinator, currentState int) {
+	defer c.l.Unlock()
+	c.l.Lock()
+	if(c.jobType<currentState+1){
+		c.jobType = currentState+1
+	}
+
 }

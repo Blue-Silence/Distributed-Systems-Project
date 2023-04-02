@@ -23,6 +23,7 @@ type JobRequest struct {
 
 type JobReply struct {
 	vaild bool
+	exit bool
 	wId int
 	jobType int 
 	file string 
@@ -33,10 +34,13 @@ type JobReply struct {
 
 type HeartBeat struct {
 	wid int
+	sendTime int64
 }
 
 type HeartBeatReply struct {
 	state int
+	lastHeartBeatT int64
+	lease int64
 }
 
 type JobCompleteSig struct {

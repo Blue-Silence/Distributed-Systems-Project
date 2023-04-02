@@ -14,6 +14,24 @@ type KeyValue struct {
 	Value string
 }
 
+type WorkerState struct {
+	vaild bool
+	wId int
+	jobType int 
+	file string 
+	reduceId int
+	lastHeartBeatT int64
+	lease int64
+}
+
+
+const (
+	WNormal		= 1
+	WEmptyJob	= 0
+	WCallFail	= -1
+	WExit		= -2
+)
+
 //
 // use ihash(key) % NReduce to choose the reduce
 // task number for each KeyValue emitted by Map.
@@ -30,7 +48,23 @@ func ihash(key string) int {
 //
 func Worker(mapf func(string, string) []KeyValue,
 	reducef func(string, []string) string) {
+	
+	for {
+		var state WorkerState
+		var heartBeatChan chan int 
+		//var finishChan chan int 
+		switch state.getJob(heartBeatChan){
+			case WEmptyJob :
+				continue 
+			case WCallFail : 
+				continue 
+			case WExit : 
+				break
+			case WNormal :
+				//TO BE DONE
 
+		}
+	}
 	// Your worker implementation here.
 
 	// uncomment to send the Example RPC to the coordinator.
@@ -90,4 +124,34 @@ func call(rpcname string, args interface{}, reply interface{}) bool {
 
 	fmt.Println(err)
 	return false
+}
+
+func (w *WorkerState) getJob(c chan int) int {
+	args := JobRequest{}
+	reply := JobReply{}
+	ok := call("Coordinator.GetJob", &args, &reply)
+	if ok {
+		switch {
+			case reply.vaild == false :
+				return WEmptyJob
+			case reply.exit :
+				return WExit
+			default : 
+				w.vaild = reply.vaild
+				w.wId = reply.wId
+				w.jobType = reply.jobType
+				w.file = reply.file
+				w.reduceId = reply.reduceId
+				w.lastHeartBeatT = reply.startT 
+				w.lease = reply.lease
+				go mkHearBeat(w, c)
+				return WNormal
+		}
+	} else {
+		return WCallFail
+	}
+}
+
+func mkHearBeat(w *WorkerState, c chan int) {
+	// TO BE DONE
 }
