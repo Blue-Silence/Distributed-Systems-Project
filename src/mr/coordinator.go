@@ -67,7 +67,7 @@ func MakeCoordinator(files []string, nReduce int) *Coordinator {
 		c.reduceInputFiles[i].jobType = JReduce
 	}
 	c.jobType = JMap 
-
+	go cleaning(&c)
 	// Your code here.
 
 
@@ -117,6 +117,7 @@ type Job struct {
 	fileId int64
 
 	reduceId int
+	immeFile []string
 
 	w *WorkerStat
 	l sync.Mutex
@@ -151,7 +152,7 @@ func (c *Coordinator) GetJob(args *JobRequest, reply *JobReply) error {
 		case JMap:
 			job = getFreeMapJ(&c.mapInputFiles)
 		case JReduce:
-			job = getFreeReduceJ(&c.reduceInputFiles)
+			job = getFreeReduceJ(&c.mapInputFiles, &c.reduceInputFiles)
 		case JDone:
 			reply.vaild = false
 			reply.exit = true
@@ -281,20 +282,29 @@ func  getFreeMapJ(m *map[string]*Job) *Job {
 	return nil
 }
 
-func  getFreeReduceJ(m *[]Job) *Job {
-	for _,j := range *m {
+func  getFreeReduceJ(mf *map[string]*Job , m *[]Job) *Job {
+	immeF := []int64{}
+
+	for _,j := range *mf {
+		j.l.Lock()
+		immeF = append(immeF, j.fileId)
+		j.l.Unlock()
+	}
+
+	for i,_ := range *m {
+		j := &((*m)[i])
 		j.l.Lock()
 		if(j.vaild){
 			j.w.l.Lock()
 			if(!j.complete && timeExpire(j.w)) {
 				j.w.l.Unlock()
-				return &j
+				return j
 			} else {
 				j.w.l.Unlock()
 				j.l.Unlock()
 			}
 		} else {
-			return &j
+			return j
 		}	
 	}
 

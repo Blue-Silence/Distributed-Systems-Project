@@ -30,6 +30,8 @@ type JobReply struct {
 	reduceId int
 	startT int64
 	lease int64
+
+	immeFile []int64
 }
 
 type HeartBeat struct {
