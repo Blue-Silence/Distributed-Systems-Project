@@ -6,23 +6,9 @@ import "os"
 import "net/rpc"
 import "net/http"
 
+import "time"
+import "sync"
 
-type Coordinator struct {
-	// Your definitions here.
-
-}
-
-// Your code here -- RPC handlers for the worker to call.
-
-//
-// an example RPC handler.
-//
-// the RPC argument and reply types are defined in rpc.go.
-//
-func (c *Coordinator) Example(args *ExampleArgs, reply *ExampleReply) error {
-	reply.Y = args.X + 1
-	return nil
-}
 
 
 //
@@ -60,11 +46,214 @@ func (c *Coordinator) Done() bool {
 // nReduce is the number of reduce tasks to use.
 //
 func MakeCoordinator(files []string, nReduce int) *Coordinator {
+	
 	c := Coordinator{}
+	c.mapInputFiles = make(map[string]*Job)
+	c.reduceInputFiles = make([]Job,nReduce)
+	c.workers = make([]WorkerStat,0)
+	for _, fname := range files {
+		var a Job
+		a.complete = false
+		a.vaild = false
+		a.jobType = JMap 
+		a.file = fname
+		c.mapInputFiles[fname] = &a
+	}
+	for i, _ := range c.reduceInputFiles {
+		c.reduceInputFiles[i].complete = false
+		c.reduceInputFiles[i].vaild = false
+		c.reduceInputFiles[i].reduceId = i
+		c.reduceInputFiles[i].jobType = JReduce
+	}
+	c.jobType = JMap 
 
 	// Your code here.
 
 
 	c.server()
 	return &c
+}
+
+
+
+
+/////////////////////////////////////////////////////////////////////
+
+
+
+
+
+
+const workerLifeTimeOnServer int64 = 12
+const workerLifeTimeOnWorker int64 = 10
+
+const (
+	Idle int	= 0
+	Running		= 1
+	Down		= 2
+	Finished	= 3
+)
+
+const (
+	JMap int	= 0
+	JReduce		= 1
+	JDone		= 2
+)
+
+
+type WorkerStat struct {
+	wId int 
+	startT int64 //time.Time 
+	lastHeartBeat int64 //time.Time
+	state int
+	l sync.Mutex
+	vaild bool
+}
+
+type Job struct {
+	jobType int
+
+	file string
+	reduceId int
+
+	w *WorkerStat
+	l sync.Mutex
+	complete bool
+	vaild bool
+}
+
+type Coordinator struct {
+	// Your definitions here.
+	mapInputFiles map[string]*Job
+	//mapOuputFiles [][]string
+	reduceInputFiles []Job
+	workers []WorkerStat
+	jobType int
+	l sync.Mutex
+
+}
+
+func (c *Coordinator) GetJob(args *JobRequest, reply *JobReply) error {
+	reply.vaild = true
+	c.l.Lock()
+	jobType := c.jobType
+	c.l.Unlock()
+	var job *Job
+	switch  jobType {
+		case JMap:
+			job = getFreeMapJ(&c.mapInputFiles)
+		case JReduce:
+			job = getFreeReduceJ(&c.reduceInputFiles)
+		case JDone:
+			reply.vaild = false
+	}
+
+	switch {
+		case reply.vaild && job != nil :
+			w :=  getFreeWID(c)
+			initWorker(w)
+			job.w = w 
+
+			reply.wId = w.wId
+			reply.vaild = true 
+			reply.jobType = job.jobType 
+			reply.file = job.file
+			reply.reduceId = job.reduceId
+			reply.startT = w.startT
+			reply.lease = workerLifeTimeOnWorker
+
+			w.l.Unlock()
+			job.l.Unlock()
+		case !reply.vaild : 
+		case job == nil : 
+			refreshStat(c)
+		default :
+	}
+		return nil
+
+}
+
+func (c *Coordinator) MkHeartBeat(args *HeartBeat, reply *HeartBeatReply) error {
+	//reply.Y = args.X + 1
+	return nil
+}
+
+func (c *Coordinator) FinishJob(args *JobCompleteSig, reply *int) error {
+	//reply.Y = args.X + 1
+	return nil
+}
+
+
+func  getFreeWID(c *Coordinator) *WorkerStat {
+	defer c.l.Unlock()
+	c.l.Lock()
+	i := 0
+	for _,_ = range c.workers {
+		i++
+		w := &c.workers[i]
+		w.l.Lock()
+		if(!w.vaild || timeExpire(w)){
+			return w
+		}
+	}
+
+	c.workers = append(c.workers, WorkerStat{})
+	c.workers[i].l.Lock()
+	c.workers[i].wId = i 
+	return &c.workers[i]
+}
+
+func  initWorker(w *WorkerStat) {
+		w.startT = time.Now().Unix()
+		w.lastHeartBeat = time.Now().Unix()
+		w.state = Running 
+}
+
+
+func  timeExpire(w *WorkerStat) bool {
+	if(time.Now().Unix()-w.lastHeartBeat>workerLifeTimeOnServer) { 
+			return true
+	}	else {
+			return false
+	}
+}
+
+func  getFreeMapJ(m *map[string]*Job) *Job {
+	for _,j := range *m {
+		j.l.Lock()
+		if(j.vaild){
+			j.w.l.Lock()
+			if(!j.complete && timeExpire(j.w)) {
+				j.w.l.Unlock()
+				return j
+			} else {
+				j.w.l.Unlock()
+				j.l.Unlock()
+			}
+		} else {
+			return j
+		}	
+	}
+
+	return nil
+}
+
+func  getFreeReduceJ(m *[]Job) *Job {
+	for _,j := range *m {
+		j.l.Lock()
+		if(j.vaild){
+			j.w.l.Lock()
+			if(!j.complete && timeExpire(j.w)) {
+				j.w.l.Unlock()
+				return &j
+			} else {
+				j.w.l.Unlock()
+				j.l.Unlock()
+			}
+		} else {
+			return &j
+		}	
+	}
+
+	return nil
 }

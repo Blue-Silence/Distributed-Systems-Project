@@ -8,19 +8,45 @@ package mr
 
 import "os"
 import "strconv"
+//import "time"
 
 //
 // example to show how to declare the arguments
 // and reply for an RPC.
 //
 
-type ExampleArgs struct {
-	X int
+
+
+
+type JobRequest struct {
 }
 
-type ExampleReply struct {
-	Y int
+type JobReply struct {
+	vaild bool
+	wId int
+	jobType int 
+	file string 
+	reduceId int
+	startT int64
+	lease int64
 }
+
+type HeartBeat struct {
+	wid int
+}
+
+type HeartBeatReply struct {
+	state int
+}
+
+type JobCompleteSig struct {
+	wId int
+	jobType int 
+	mapFile string 
+	reduceId int
+
+}
+
 
 // Add your RPC definitions here.
 

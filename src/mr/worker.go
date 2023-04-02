@@ -43,7 +43,7 @@ func Worker(mapf func(string, string) []KeyValue,
 //
 // the RPC argument and reply types are defined in rpc.go.
 //
-func CallExample() {
+/*func CallExample() {
 
 	// declare an argument structure.
 	args := ExampleArgs{}
@@ -52,7 +52,7 @@ func CallExample() {
 	args.X = 99
 
 	// declare a reply structure.
-	reply := ExampleReply{}
+	reply := CorReply{}
 
 	// send the RPC request, wait for the reply.
 	// the "Coordinator.Example" tells the
@@ -65,7 +65,9 @@ func CallExample() {
 	} else {
 		fmt.Printf("call failed!\n")
 	}
-}
+}*/
+
+
 
 //
 // send an RPC request to the coordinator, wait for the response.
