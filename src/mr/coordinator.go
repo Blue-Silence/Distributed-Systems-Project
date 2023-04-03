@@ -95,8 +95,9 @@ func MakeCoordinator(files []string, nReduce int) *Coordinator {
 
 
 
-const workerLifeTimeOnServer int64 = 5
-const workerLifeTimeOnWorker int64 = 4
+const workerLifeTimeOnServer int64 = 2
+const workerLifeTimeOnWorker int64 = 1
+const jobLifeTimeOnServer int64 = 10
 
 const (
 	Running		= 0
@@ -294,7 +295,7 @@ func  initWorker(w *WorkerStat) {
 
 
 func  timeExpire(w *WorkerStat) bool {
-	if(time.Now().Unix()-w.lastHeartBeat>workerLifeTimeOnServer) { 
+	if(time.Now().Unix()-w.lastHeartBeat>workerLifeTimeOnServer || time.Now().Unix()-w.startT>jobLifeTimeOnServer) { 
 			return true
 	}	else {
 			return false
