@@ -51,6 +51,7 @@ func MakeCoordinator(files []string, nReduce int) *Coordinator {
 	c.mapInputFiles = make(map[string]*Job)
 	c.reduceInputFiles = make([]Job,nReduce)
 	c.workers.lt = make(map[int64]*WorkerStat,0)
+	c.nReduce = nReduce
 	c.workers.counter = 0
 	for _, fname := range files {
 		var a Job
@@ -117,7 +118,7 @@ type Job struct {
 	fileId int64
 
 	reduceId int
-	immeFile []string
+	immeFile []int64
 
 	w *WorkerStat
 	l sync.Mutex
@@ -132,9 +133,12 @@ type WorkerLst struct {
 
 type Coordinator struct {
 	// Your definitions here.
+	nReduce int
 	mapInputFiles map[string]*Job
 	//mapOuputFiles [][]string
+	mapOutputId map[string]int64
 	reduceInputFiles []Job
+	reduceOutputId map[int]int64
 	workers WorkerLst
 	jobType int
 	l sync.Mutex
@@ -146,13 +150,14 @@ func (c *Coordinator) GetJob(args *JobRequest, reply *JobReply) error {
 	reply.exit = false
 	c.l.Lock()
 	jobType := c.jobType
+	reply.nReduce = c.nReduce
 	c.l.Unlock()
 	var job *Job
 	switch  jobType {
 		case JMap:
 			job = getFreeMapJ(&c.mapInputFiles)
 		case JReduce:
-			job = getFreeReduceJ(&c.mapInputFiles, &c.reduceInputFiles)
+			job = getFreeReduceJ(c, &c.reduceInputFiles)
 		case JDone:
 			reply.vaild = false
 			reply.exit = true
@@ -171,6 +176,8 @@ func (c *Coordinator) GetJob(args *JobRequest, reply *JobReply) error {
 			reply.reduceId = job.reduceId
 			reply.startT = w.startT
 			reply.lease = workerLifeTimeOnWorker
+
+			reply.immeFile = job.immeFile
 
 			w.l.Unlock()
 			job.l.Unlock()
@@ -213,12 +220,16 @@ func (c *Coordinator) MkHeartBeat(args *HeartBeat, reply *HeartBeatReply) error 
 func (c *Coordinator) FinishJob(args *JobCompleteSig, reply *int) error {
 	//reply.Y = args.X + 1
 	var j *Job
+	c.l.Lock()
 	switch args.jobType {
 		case JMap :
 			j = c.mapInputFiles[args.mapFile]
+			c.mapOutputId[args.mapFile] = args.wId
 		case JReduce:
 			j = &c.reduceInputFiles[args.reduceId]
+			c.reduceOutputId[args.reduceId] = args.wId
 		}
+	c.l.Unlock()
 
 	j.l.Lock()
 	j.complete = true
@@ -282,14 +293,12 @@ func  getFreeMapJ(m *map[string]*Job) *Job {
 	return nil
 }
 
-func  getFreeReduceJ(mf *map[string]*Job , m *[]Job) *Job {
+func  getFreeReduceJ(c *Coordinator, m *[]Job) *Job {
 	immeF := []int64{}
-
-	for _,j := range *mf {
-		j.l.Lock()
-		immeF = append(immeF, j.fileId)
-		j.l.Unlock()
-	}
+	c.l.Lock()
+	for _,v := range c.mapOutputId {
+		immeF = append(immeF,v)
+	} 
 
 	for i,_ := range *m {
 		j := &((*m)[i])

@@ -30,6 +30,7 @@ type JobReply struct {
 	reduceId int
 	startT int64
 	lease int64
+	nReduce int
 
 	immeFile []int64
 }

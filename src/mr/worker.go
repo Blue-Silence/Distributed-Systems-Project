@@ -7,6 +7,10 @@ import "hash/fnv"
 
 import "sync"
 import "time"
+import "os"
+import "io/ioutil"
+//import "sort"
+
 
 //
 // Map functions return a slice of KeyValue.
@@ -25,6 +29,9 @@ type WorkerState struct {
 	reduceId int
 	lastHeartBeatT int64
 	lease int64
+
+	nReduce int
+	immeFile []int64
 }
 
 
@@ -65,7 +72,8 @@ func Worker(mapf func(string, string) []KeyValue,
 			case WExit : 
 				break
 			case WNormal :
-				//TO BE DONE
+				state.runJob(mapf, reducef)
+				mkCompleteSig(&state)
 
 		}
 	}
@@ -130,6 +138,7 @@ func call(rpcname string, args interface{}, reply interface{}) bool {
 	return false
 }
 
+
 func (w *WorkerState) getJob(c chan int) int {
 	args := JobRequest{}
 	reply := JobReply{}
@@ -149,6 +158,8 @@ func (w *WorkerState) getJob(c chan int) int {
 				w.reduceId = reply.reduceId
 				w.lastHeartBeatT = reply.startT 
 				w.lease = reply.lease
+				w.nReduce = reply.nReduce
+				w.immeFile = reply.immeFile
 				c <- 1
 				return WNormal
 		}
@@ -189,4 +200,74 @@ func mkHearBeat(w *WorkerState, c chan int) {
 		}
 		
 	}
+}
+
+func mkCompleteSig(w *WorkerState) {
+	w.l.Lock()
+	defer w.l.Unlock()
+	if(!w.vaild){
+		return
+	}
+	args := JobCompleteSig{wId : w.wId, 
+							jobType : w.jobType,
+							mapFile : w.file,
+							reduceId : w.reduceId,
+						}
+	w.vaild = false
+	var reply int 
+	call("Coordinator.FinishJob", &args, &reply)
+
+}
+
+func (w *WorkerState) runJob(mapf func(string, string) []KeyValue,
+			reducef func(string, []string) string){
+	w.l.Lock()
+	switch w.jobType {
+		case JMap :
+			//abababa
+		case JReduce :
+			//abababa
+	}
+
+}
+
+func (w *WorkerState) runMapJob(mapf func(string, string) []KeyValue,) {
+	filename := w.file
+	wid := w.wId
+	nReduce := w.nReduce
+	//intermediate := []KeyValue{}
+	file, err := os.Open(filename)
+	if err != nil {
+		log.Fatalf("cannot open %v", filename)
+		w.vaild = false
+	}
+	content, err := ioutil.ReadAll(file)
+	if err != nil {
+		log.Fatalf("cannot read %v", filename)
+		w.vaild = false
+	}
+	file.Close()
+	w.l.Unlock()
+
+	kva := mapf(filename, string(content))
+	//intermediate = append(intermediate, kva...)
+
+	var fLt []*os.File 
+	for i:=0;i<nReduce;i++ {
+		n := fmt.Sprintf("WID%v-%v",wid,i)
+		f,_ := os.Create(n)
+		fLt = append(fLt,f)
+	}
+
+	for _,v := range kva {
+		fmt.Fprintf(fLt[ihash(v.Key)], "%s %s\n", v.Key, v.Value)
+	}
+
+}
+
+func (w *WorkerState) runReduceJob(reducef func(string, []string) string) {
+	immeFile := w.immeFile
+	wid := w.wId
+	nReduce := w.nReduce
+	reduceId := w.reduceId 
 }
