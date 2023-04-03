@@ -288,7 +288,7 @@ func (w *WorkerState) runMapJob(mapf func(string, string) []KeyValue,) {
 
 	var fLt []*os.File 
 	for i:=0;i<nReduce;i++ {
-		n := fmt.Sprintf("/home/usera/6.5840/src/main/mr-tmp/IN-WID%v-%v",wid,i)
+		n := fmt.Sprintf("/home/usera/6.5840/src/main/tmp/IN-WID%v-%v",wid,i)
 		f,_ := os.Create(n)
 		fLt = append(fLt,f)
 	}
@@ -308,9 +308,9 @@ func (w *WorkerState) runReduceJob(reducef func(string, []string) string) {
 	w.l.Unlock()
 	intermediate := []KeyValue{}
 	for _,fileID := range immeFile {
-		file,err := os.Open(fmt.Sprintf("/home/usera/6.5840/src/main/mr-tmp/IN-WID%v-%v",fileID,reduceId))
+		file,err := os.Open(fmt.Sprintf("/home/usera/6.5840/src/main/tmp/IN-WID%v-%v",fileID,reduceId))
 		if(err != nil) {
-			//fmt.Println("ERR in open file: ", err, "Filename: ", fmt.Sprintf("mr-tmp/IN-WID%v-%v",fileID,reduceId))
+			fmt.Println("ERR in open file: ", err)
 		}
 		for {
 			t := KeyValue{}
@@ -332,7 +332,7 @@ func (w *WorkerState) runReduceJob(reducef func(string, []string) string) {
 
 	//oname := fmt.Sprintf("mr-tmp/WID-%v-mr-out-%v", wid, reduceId)
 	//ofile, _ := os.Create(oname)
-	ofile,_ := os.CreateTemp("/home/usera/6.5840/src/main/mr-out", "")
+	ofile,_ := os.CreateTemp("","*")//"/home/usera/6.5840/src/main/mr-out", "")
 
 	i := 0
 	for i < len(intermediate) {
@@ -352,7 +352,7 @@ func (w *WorkerState) runReduceJob(reducef func(string, []string) string) {
 		i = j
 	}
 
-	os.Rename(ofile.Name(),fmt.Sprintf("/home/usera/6.5840/src/main/mr-out-%v", reduceId))
+	os.Rename(ofile.Name(),fmt.Sprintf("./mr-out-%v", reduceId))
 	ofile.Close()
 
 }
