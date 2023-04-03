@@ -97,7 +97,7 @@ func MakeCoordinator(files []string, nReduce int) *Coordinator {
 
 const workerLifeTimeOnServer int64 = 2
 const workerLifeTimeOnWorker int64 = 1
-const jobLifeTimeOnServer int64 = 10
+const jobLifeTimeOnServer int64 = 20
 
 const (
 	Running		= 0
