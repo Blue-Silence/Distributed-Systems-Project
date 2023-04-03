@@ -10,13 +10,6 @@ import "os"
 import "strconv"
 //import "time"
 
-//
-// example to show how to declare the arguments
-// and reply for an RPC.
-//
-
-
-
 
 type JobRequest struct {
 }

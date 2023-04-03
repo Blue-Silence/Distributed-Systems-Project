@@ -143,10 +143,10 @@ type WorkerLst struct {
 
 type Coordinator struct {
 	counter int64
-	// Your definitions here.
+
 	nReduce int
 	mapInputFiles map[string]*Job
-	//mapOuputFiles [][]string
+
 	mapOutputId map[string]int64
 	reduceInputFiles []Job
 	reduceOutputId map[int]int64
@@ -158,7 +158,6 @@ type Coordinator struct {
 
 func (c *Coordinator) GetJob(args *JobRequest, reply *JobReply) error {
 	
-	//fmt.Println("T 1")
 	reply.Vaild = true
 	reply.Exit = false
 	c.l.Lock()
@@ -166,7 +165,6 @@ func (c *Coordinator) GetJob(args *JobRequest, reply *JobReply) error {
 	reply.NReduce = c.nReduce
 	c.counter++
 	c.l.Unlock()
-	//fmt.Println("T 2")
 	var job *Job
 	switch  jobType {
 		case JMap:
@@ -174,19 +172,15 @@ func (c *Coordinator) GetJob(args *JobRequest, reply *JobReply) error {
 		case JReduce:
 			job = getFreeReduceJ(c, &c.reduceInputFiles)
 		case JDone:
-			//fmt.Println("EXITING!!!")
 			reply.Vaild = false
 			reply.Exit = true
 	}
-	//fmt.Println("T 3")
 	switch {
 		case reply.Vaild && job != nil :
-			//fmt.Println("T 3.5")
 			job.vaild = true
 			w :=  getFreeWID(c)
-			//fmt.Println("T 3.625")
 			initWorker(w)
-			//fmt.Println("T 3.75")
+
 			job.w = w 
 			reply.WId = w.wId
 			reply.Vaild = true 
@@ -200,14 +194,11 @@ func (c *Coordinator) GetJob(args *JobRequest, reply *JobReply) error {
 
 			w.l.Unlock()
 			job.l.Unlock()
-			//fmt.Println("T 4")
+
 		case !reply.Vaild : 
-		//fmt.Println("T 4.5")
 		case job == nil : 
-		//fmt.Println("T 5")
 			forwardStat(c, jobType)
 			reply.Vaild = false
-			//fmt.Println("T 6")
 		default :
 	}
 		if(reply.Vaild) {
@@ -220,7 +211,7 @@ func (c *Coordinator) GetJob(args *JobRequest, reply *JobReply) error {
 func (c *Coordinator) MkHeartBeat(args *HeartBeat, reply *HeartBeatReply) error {
 
 	c.l.Lock()
-	w := c.workers.lt[args.Wid] //[args.Wid].l.Lock()
+	w := c.workers.lt[args.Wid] 
 	if w == nil {
 		reply.State = Killed
 		c.l.Unlock()
@@ -245,8 +236,6 @@ func (c *Coordinator) MkHeartBeat(args *HeartBeat, reply *HeartBeatReply) error 
 }
 
 func (c *Coordinator) FinishJob(args *JobCompleteSig, reply *int) error {
-	//reply.Y = args.X + 1
-	//fmt.Println("Job finished: ", *args)
 	var j *Job
 	c.l.Lock()
 	switch args.JobType {
@@ -275,9 +264,7 @@ func (c *Coordinator) FinishJob(args *JobCompleteSig, reply *int) error {
 
 func  getFreeWID(c *Coordinator) *WorkerStat {
 	defer c.l.Unlock()
-	//fmt.Println("T 3.333333")
 	c.l.Lock()
-	//fmt.Println("T 3.4444444")
 	ws := &c.workers
 	w := WorkerStat{wId : ws.counter}
 	w.l.Lock()
@@ -375,11 +362,6 @@ func  forwardStat(c *Coordinator, currentState int) {
 	}
 
 	c.jobType = state
-	//if(c.jobType<currentState+1){
-	//	c.jobType = currentState+1
-	//}
-
-	//fmt.Println("Fowarding:",c.jobType)
 
 }
 

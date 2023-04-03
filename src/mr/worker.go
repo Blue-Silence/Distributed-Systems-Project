@@ -69,63 +69,28 @@ func Worker(mapf func(string, string) []KeyValue,
 		
 		var state WorkerState
 		heartBeatChan := make(chan int) 
-		//var finishChan chan int 
+
 		go mkHearBeat(&state, heartBeatChan)
 
 	for {
-		//fmt.Println("Hello from work")
+
 		switch state.getJob(heartBeatChan){
 			case WEmptyJob :
-				//fmt.Println("T 1")
 				continue 
 			case WCallFail : 
-				//fmt.Println("T 2")
 				continue 
 			case WExit : 
-				//fmt.Println("T 3")
 				return
 			case WNormal :
-				//fmt.Println("moving!")
 				state.runJob(mapf, reducef)
 				mkCompleteSig(&state)
 
 		}
 	}
-	// Your worker implementation here.
-
-	// uncomment to send the Example RPC to the coordinator.
-	// CallExample()
 
 }
 
-//
-// example function to show how to make an RPC call to the coordinator.
-//
-// the RPC argument and reply types are defined in rpc.go.
-//
-/*func CallExample() {
 
-	// declare an argument structure.
-	args := ExampleArgs{}
-
-	// fill in the argument(s).
-	args.X = 99
-
-	// declare a reply structure.
-	reply := CorReply{}
-
-	// send the RPC request, wait for the reply.
-	// the "Coordinator.Example" tells the
-	// receiving server that we'd like to call
-	// the Example() method of struct Coordinator.
-	ok := call("Coordinator.Example", &args, &reply)
-	if ok {
-		// reply.Y should be 100.
-		fmt.Printf("reply.Y %v\n", reply.Y)
-	} else {
-		fmt.Printf("call failed!\n")
-	}
-}*/
 
 
 
@@ -148,7 +113,6 @@ func call(rpcname string, args interface{}, reply interface{}) bool {
 		return true
 	}
 
-	//fmt.Println(err)
 	return false
 }
 
@@ -156,22 +120,16 @@ func call(rpcname string, args interface{}, reply interface{}) bool {
 func (w *WorkerState) getJob(c chan int) int {
 	args := JobRequest{}
 	reply := JobReply{}
-	////fmt.Println("What happen?")
+
 	ok := call("Coordinator.GetJob", &args, &reply)
-	//fmt.Println("Hello from worker",reply)
-	////fmt.Println("Is it exit?:",reply.Exit)
 	if ok {
 		switch {
 			case reply.Vaild == false && reply.Exit == false:
-				//fmt.Println("Worker pending")
 				return WEmptyJob
 			case reply.Exit :
 				w.l.Lock()
-				//fmt.Println("EXITING!!!")
 				w.vaild = false 
 				w.l.Unlock()
-				//c <- 0
-				//fmt.Println("Ready to exit!")
 				return WExit
 			default : 
 				w.l.Lock()
@@ -184,10 +142,8 @@ func (w *WorkerState) getJob(c chan int) int {
 				w.lease = reply.Lease
 				w.nReduce = reply.NReduce
 				w.immeFile = reply.ImmeFile
-				////fmt.Println("Hello from worker 111")
 				w.l.Unlock()
 				c <- 1
-				////fmt.Println("Hello from worker")
 				return WNormal
 		}
 	} else {
@@ -203,13 +159,10 @@ func mkHearBeat(w *WorkerState, c chan int) {
 	var a int 
 	for {
 
-		////fmt.Println("Beating!")
 		w.l.Lock()
 		for (!w.vaild) {
 			w.l.Unlock()
-			////fmt.Println("Stuck!")
 			a = <- c 
-			////fmt.Println("GO!")
 			if(a == 0) {
 				return
 			}
@@ -243,7 +196,6 @@ func mkCompleteSig(w *WorkerState) {
 							MapFile : w.file,
 							ReduceId : w.reduceId,
 						}
-	//fmt.Println("Complete sign: ", w)
 	w.vaild = false
 	var reply int 
 	call("Coordinator.FinishJob", &args, &reply)
@@ -257,8 +209,6 @@ func (w *WorkerState) runJob(mapf func(string, string) []KeyValue,
 		case JMap :
 			w.runMapJob(mapf)
 		case JReduce :
-			//fmt.Println("Working on reduce")
-			//w.l.Unlock()
 			w.runReduceJob(reducef)
 	}
 
@@ -284,11 +234,8 @@ func (w *WorkerState) runMapJob(mapf func(string, string) []KeyValue,) {
 
 	kva := mapf(filename, string(content))
 
-	//intermediate = append(intermediate, kva...)
-
 	var fLt []*os.File 
 	for i:=0;i<nReduce;i++ {
-		//n := fmt.Sprintf("/home/usera/6.5840/src/main/tmp/IN-WID%v-%v",wid,i)
 		n := fmt.Sprintf("IN-WID%v-%v",wid,i)
 		f,_ := os.Create(n)
 		fLt = append(fLt,f)
@@ -302,14 +249,11 @@ func (w *WorkerState) runMapJob(mapf func(string, string) []KeyValue,) {
 
 func (w *WorkerState) runReduceJob(reducef func(string, []string) string) {
 	immeFile := w.immeFile
-	//wid := w.wId
-	//nReduce := w.nReduce
 	reduceId := w.reduceId 
-	//fmt.Println("Reduce running! ID: ",reduceId)
+
 	w.l.Unlock()
 	intermediate := []KeyValue{}
 	for _,fileID := range immeFile {
-		//file,err := os.Open(fmt.Sprintf("/home/usera/6.5840/src/main/tmp/IN-WID%v-%v",fileID,reduceId))
 		file,err := os.Open(fmt.Sprintf("IN-WID%v-%v",fileID,reduceId))
 		if(err != nil) {
 			fmt.Println("ERR in open file: ", err)
@@ -318,7 +262,6 @@ func (w *WorkerState) runReduceJob(reducef func(string, []string) string) {
 			t := KeyValue{}
 			n,err := fmt.Fscanf(file, "%v %v\n", &t.Key, &t.Value)
 			if	(n<2 || err != nil) {
-				//fmt.Println("ERR: ", err,)
 				break
 			} else {
 				intermediate = append(intermediate, t)
@@ -327,14 +270,10 @@ func (w *WorkerState) runReduceJob(reducef func(string, []string) string) {
 		file.Close()
 
 	}
-
-	////fmt.Println(intermediate)
 	
 	sort.Sort(ByKey(intermediate))
 
-	//oname := fmt.Sprintf("mr-tmp/WID-%v-mr-out-%v", wid, reduceId)
-	//ofile, _ := os.Create(oname)
-	ofile,_ := os.CreateTemp("","*")//"/home/usera/6.5840/src/main/mr-out", "")
+	ofile,_ := os.CreateTemp("","*")
 
 	i := 0
 	for i < len(intermediate) {
