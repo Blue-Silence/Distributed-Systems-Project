@@ -8,7 +8,7 @@ import "net/http"
 
 import "time"
 import "sync"
-
+import "fmt"
 
 
 //
@@ -33,7 +33,11 @@ func (c *Coordinator) server() {
 //
 func (c *Coordinator) Done() bool {
 	ret := false
-
+	c.l.Lock()
+	defer c.l.Unlock()
+	if(c.jobType == JDone) {
+		ret = true
+	}
 	// Your code here.
 
 
@@ -49,10 +53,15 @@ func MakeCoordinator(files []string, nReduce int) *Coordinator {
 	
 	c := Coordinator{}
 	c.mapInputFiles = make(map[string]*Job)
+	for n,_ := range c.mapInputFiles {
+		c.mapInputFiles[n] = &(Job{})
+	}
 	c.reduceInputFiles = make([]Job,nReduce)
 	c.workers.lt = make(map[int64]*WorkerStat,0)
 	c.nReduce = nReduce
 	c.workers.counter = 0
+	c.mapOutputId = make(map[string]int64)
+	c.reduceOutputId = make(map[int]int64)
 	for _, fname := range files {
 		var a Job
 		a.complete = false
@@ -132,6 +141,7 @@ type WorkerLst struct {
 }
 
 type Coordinator struct {
+	counter int64
 	// Your definitions here.
 	nReduce int
 	mapInputFiles map[string]*Job
@@ -146,12 +156,16 @@ type Coordinator struct {
 }
 
 func (c *Coordinator) GetJob(args *JobRequest, reply *JobReply) error {
-	reply.vaild = true
-	reply.exit = false
+	
+	fmt.Println("T 1")
+	reply.Vaild = true
+	reply.Exit = false
 	c.l.Lock()
 	jobType := c.jobType
-	reply.nReduce = c.nReduce
+	reply.NReduce = c.nReduce
+	c.counter++
 	c.l.Unlock()
+	fmt.Println("T 2")
 	var job *Job
 	switch  jobType {
 		case JMap:
@@ -159,33 +173,42 @@ func (c *Coordinator) GetJob(args *JobRequest, reply *JobReply) error {
 		case JReduce:
 			job = getFreeReduceJ(c, &c.reduceInputFiles)
 		case JDone:
-			reply.vaild = false
-			reply.exit = true
+			reply.Vaild = false
+			reply.Exit = true
 	}
-
+	fmt.Println("T 3")
 	switch {
-		case reply.vaild && job != nil :
+		case reply.Vaild && job != nil :
+			fmt.Println("T 3.5")
+			job.vaild = true
 			w :=  getFreeWID(c)
+			fmt.Println("T 3.625")
 			initWorker(w)
+			fmt.Println("T 3.75")
 			job.w = w 
+			reply.WId = w.wId
+			reply.Vaild = true 
+			reply.JobType = job.jobType 
+			reply.File = job.file
+			reply.ReduceId = job.reduceId
+			reply.StartT = w.startT
+			reply.Lease = workerLifeTimeOnWorker
 
-			reply.wId = w.wId
-			reply.vaild = true 
-			reply.jobType = job.jobType 
-			reply.file = job.file
-			reply.reduceId = job.reduceId
-			reply.startT = w.startT
-			reply.lease = workerLifeTimeOnWorker
-
-			reply.immeFile = job.immeFile
+			reply.ImmeFile = job.immeFile
 
 			w.l.Unlock()
 			job.l.Unlock()
-		case !reply.vaild : 
+			fmt.Println("T 4")
+		case !reply.Vaild : 
+		fmt.Println("T 4.5")
 		case job == nil : 
+		fmt.Println("T 5")
 			forwardStat(c, jobType)
+			reply.Vaild = false
+			fmt.Println("T 6")
 		default :
 	}
+		fmt.Println("Deliver job:", *reply)
 		return nil
 
 }
@@ -193,9 +216,9 @@ func (c *Coordinator) GetJob(args *JobRequest, reply *JobReply) error {
 func (c *Coordinator) MkHeartBeat(args *HeartBeat, reply *HeartBeatReply) error {
 
 	c.l.Lock()
-	w := c.workers.lt[args.wid] //[args.wid].l.Lock()
+	w := c.workers.lt[args.Wid] //[args.Wid].l.Lock()
 	if w == nil {
-		reply.state = Killed
+		reply.State = Killed
 		c.l.Unlock()
 		return nil
 	}
@@ -203,14 +226,14 @@ func (c *Coordinator) MkHeartBeat(args *HeartBeat, reply *HeartBeatReply) error 
 	w.l.Lock()
 	switch {
 		case !w.vaild :
-			reply.state = Killed 
+			reply.State = Killed 
 		default :
-			reply.lease = workerLifeTimeOnWorker
-			reply.lastHeartBeatT = time.Now().Unix()
+			reply.Lease = workerLifeTimeOnWorker
+			reply.LastHeartBeatT = time.Now().Unix()
 			if (w.lastHeartBeat + workerLifeTimeOnServer<time.Now().Unix()) {
-				reply.state = Killed
+				reply.State = Killed
 			} else {
-				reply.state = Running
+				reply.State = Running
 			}
 	}
 
@@ -219,21 +242,22 @@ func (c *Coordinator) MkHeartBeat(args *HeartBeat, reply *HeartBeatReply) error 
 
 func (c *Coordinator) FinishJob(args *JobCompleteSig, reply *int) error {
 	//reply.Y = args.X + 1
+	fmt.Println("Job finished: ", *args)
 	var j *Job
 	c.l.Lock()
-	switch args.jobType {
+	switch args.JobType {
 		case JMap :
-			j = c.mapInputFiles[args.mapFile]
-			c.mapOutputId[args.mapFile] = args.wId
+			j = c.mapInputFiles[args.MapFile]
+			c.mapOutputId[args.MapFile] = args.WId
 		case JReduce:
-			j = &c.reduceInputFiles[args.reduceId]
-			c.reduceOutputId[args.reduceId] = args.wId
+			j = &c.reduceInputFiles[args.ReduceId]
+			c.reduceOutputId[args.ReduceId] = args.WId
 		}
 	c.l.Unlock()
 
 	j.l.Lock()
 	j.complete = true
-	j.fileId = args.wId
+	j.fileId = args.WId
 	j.w.l.Lock()
 	j.w.state = Killed 
 	j.w.l.Unlock()
@@ -247,9 +271,10 @@ func (c *Coordinator) FinishJob(args *JobCompleteSig, reply *int) error {
 
 func  getFreeWID(c *Coordinator) *WorkerStat {
 	defer c.l.Unlock()
+	fmt.Println("T 3.333333")
 	c.l.Lock()
-
-	ws := c.workers
+	fmt.Println("T 3.4444444")
+	ws := &c.workers
 	w := WorkerStat{wId : ws.counter}
 	w.l.Lock()
 	ws.lt[ws.counter] = &w 
@@ -295,6 +320,7 @@ func  getFreeMapJ(m *map[string]*Job) *Job {
 
 func  getFreeReduceJ(c *Coordinator, m *[]Job) *Job {
 	immeF := []int64{}
+	defer c.l.Unlock()
 	c.l.Lock()
 	for _,v := range c.mapOutputId {
 		immeF = append(immeF,v)
@@ -327,6 +353,8 @@ func  forwardStat(c *Coordinator, currentState int) {
 		c.jobType = currentState+1
 	}
 
+	fmt.Println("Fowarding:",c.jobType)
+
 }
 
 func cleaning(c *Coordinator) {
@@ -340,6 +368,7 @@ func cleaning(c *Coordinator) {
 			}
 			w.l.Unlock()
 		}
+		c.l.Unlock()
 		time.Sleep(time.Duration(workerLifeTimeOnServer*2) * time.Second)
 
 	}

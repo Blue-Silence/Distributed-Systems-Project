@@ -59,19 +59,26 @@ func ihash(key string) int {
 func Worker(mapf func(string, string) []KeyValue,
 	reducef func(string, []string) string) {
 	
-	for {
+		
 		var state WorkerState
-		var heartBeatChan chan int 
+		heartBeatChan := make(chan int) 
 		//var finishChan chan int 
 		go mkHearBeat(&state, heartBeatChan)
+
+	for {
+		fmt.Println("Hello from work")
 		switch state.getJob(heartBeatChan){
 			case WEmptyJob :
+				fmt.Println("T 1")
 				continue 
 			case WCallFail : 
+				fmt.Println("T 2")
 				continue 
 			case WExit : 
+				fmt.Println("T 3")
 				break
 			case WNormal :
+				fmt.Println("moving!")
 				state.runJob(mapf, reducef)
 				mkCompleteSig(&state)
 
@@ -142,25 +149,32 @@ func call(rpcname string, args interface{}, reply interface{}) bool {
 func (w *WorkerState) getJob(c chan int) int {
 	args := JobRequest{}
 	reply := JobReply{}
+	fmt.Println("What happen?")
 	ok := call("Coordinator.GetJob", &args, &reply)
+	fmt.Println("Hello from worker",reply)
 	if ok {
 		switch {
-			case reply.vaild == false :
+			case reply.Vaild == false :
+				fmt.Println("Worker pending")
 				return WEmptyJob
-			case reply.exit :
+			case reply.Exit :
 				c <- 0
 				return WExit
 			default : 
-				w.vaild = reply.vaild
-				w.wId = reply.wId
-				w.jobType = reply.jobType
-				w.file = reply.file
-				w.reduceId = reply.reduceId
-				w.lastHeartBeatT = reply.startT 
-				w.lease = reply.lease
-				w.nReduce = reply.nReduce
-				w.immeFile = reply.immeFile
+				w.l.Lock()
+				w.vaild = reply.Vaild
+				w.wId = reply.WId
+				w.jobType = reply.JobType
+				w.file = reply.File
+				w.reduceId = reply.ReduceId
+				w.lastHeartBeatT = reply.StartT 
+				w.lease = reply.Lease
+				w.nReduce = reply.NReduce
+				w.immeFile = reply.ImmeFile
+				fmt.Println("Hello from worker 111")
+				w.l.Unlock()
 				c <- 1
+				fmt.Println("Hello from worker 222")
 				return WNormal
 		}
 	} else {
@@ -185,19 +199,19 @@ func mkHearBeat(w *WorkerState, c chan int) {
 			}
 			w.l.Lock()
 		}	
-		args = HeartBeat{wid : w.wId, sendTime: time.Now().Unix()}
+		args = HeartBeat{Wid : w.wId, SendTime: time.Now().Unix()}
 		ok := call("Coordinator.GetJob", &args, &reply)
 		switch {
 			case !ok :
 				w.vaild = false
-			case reply.state == Killed || reply.state == Exit :
+			case reply.State == Killed || reply.State == Exit :
 				w.vaild = false
 			default :
-				w.lastHeartBeatT = reply.lastHeartBeatT
-				w.lease = reply.lease
-				w.l.Unlock()
+				w.lastHeartBeatT = reply.LastHeartBeatT
+				w.lease = reply.Lease
 				time.Sleep(time.Duration((w.lease-(time.Now().Unix()-w.lastHeartBeatT))/2) * time.Second)
 		}
+		w.l.Unlock()
 		
 	}
 }
@@ -208,11 +222,12 @@ func mkCompleteSig(w *WorkerState) {
 	if(!w.vaild){
 		return
 	}
-	args := JobCompleteSig{wId : w.wId, 
-							jobType : w.jobType,
-							mapFile : w.file,
-							reduceId : w.reduceId,
+	args := JobCompleteSig{WId : w.wId, 
+							JobType : w.jobType,
+							MapFile : w.file,
+							ReduceId : w.reduceId,
 						}
+	fmt.Println("Complete sign: ", w)
 	w.vaild = false
 	var reply int 
 	call("Coordinator.FinishJob", &args, &reply)
@@ -224,9 +239,12 @@ func (w *WorkerState) runJob(mapf func(string, string) []KeyValue,
 	w.l.Lock()
 	switch w.jobType {
 		case JMap :
-			w.runMapJob(mapf)
+			//w.runMapJob(mapf)
+			w.l.Unlock()
 		case JReduce :
-			w.runReduceJob(reducef)
+			fmt.Println("Working on reduce")
+			w.l.Unlock()
+			//w.runReduceJob(reducef)
 	}
 
 }

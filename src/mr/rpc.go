@@ -22,35 +22,35 @@ type JobRequest struct {
 }
 
 type JobReply struct {
-	vaild bool
-	exit bool
-	wId int64
-	jobType int 
-	file string 
-	reduceId int
-	startT int64
-	lease int64
-	nReduce int
+	Vaild bool
+	Exit bool
+	WId int64
+	JobType int 
+	File string 
+	ReduceId int
+	StartT int64
+	Lease int64
 
-	immeFile []int64
+	NReduce int
+	ImmeFile []int64
 }
 
 type HeartBeat struct {
-	wid int64
-	sendTime int64
+	Wid int64
+	SendTime int64
 }
 
 type HeartBeatReply struct {
-	state int
-	lastHeartBeatT int64
-	lease int64
+	State int
+	LastHeartBeatT int64
+	Lease int64
 }
 
 type JobCompleteSig struct {
-	wId int64
-	jobType int 
-	mapFile string 
-	reduceId int
+	WId int64
+	JobType int 
+	MapFile string 
+	ReduceId int
 
 }
 
