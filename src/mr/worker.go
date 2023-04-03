@@ -178,7 +178,9 @@ func mkHearBeat(w *WorkerState, c chan int) {
 			default :
 				w.lastHeartBeatT = reply.LastHeartBeatT
 				w.lease = reply.Lease
+				w.l.Unlock()
 				time.Sleep(time.Duration((w.lease-(time.Now().Unix()-w.lastHeartBeatT))/2) * time.Second)
+				w.l.Lock()
 		}
 		w.l.Unlock()
 		
@@ -187,7 +189,7 @@ func mkHearBeat(w *WorkerState, c chan int) {
 
 func mkCompleteSig(w *WorkerState) {
 	w.l.Lock()
-	defer w.l.Unlock()
+	//defer w.l.Unlock()
 	if(!w.vaild){
 		return
 	}
@@ -198,6 +200,7 @@ func mkCompleteSig(w *WorkerState) {
 						}
 	w.vaild = false
 	var reply int 
+	w.l.Unlock()
 	call("Coordinator.FinishJob", &args, &reply)
 
 }
