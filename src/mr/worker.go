@@ -9,8 +9,15 @@ import "sync"
 import "time"
 import "os"
 import "io/ioutil"
-//import "sort"
+import "sort"
 
+// for sorting by key.
+type ByKey []KeyValue
+
+// for sorting by key.
+func (a ByKey) Len() int           { return len(a) }
+func (a ByKey) Swap(i, j int)      { a[i], a[j] = a[j], a[i] }
+func (a ByKey) Less(i, j int) bool { return a[i].Key < a[j].Key }
 
 //
 // Map functions return a slice of KeyValue.
@@ -149,10 +156,10 @@ func call(rpcname string, args interface{}, reply interface{}) bool {
 func (w *WorkerState) getJob(c chan int) int {
 	args := JobRequest{}
 	reply := JobReply{}
-	fmt.Println("What happen?")
+	//fmt.Println("What happen?")
 	ok := call("Coordinator.GetJob", &args, &reply)
 	fmt.Println("Hello from worker",reply)
-	fmt.Println("Is it exit?:",reply.Exit)
+	//fmt.Println("Is it exit?:",reply.Exit)
 	if ok {
 		switch {
 			case reply.Vaild == false && reply.Exit == false:
@@ -177,10 +184,10 @@ func (w *WorkerState) getJob(c chan int) int {
 				w.lease = reply.Lease
 				w.nReduce = reply.NReduce
 				w.immeFile = reply.ImmeFile
-				fmt.Println("Hello from worker 111")
+				//fmt.Println("Hello from worker 111")
 				w.l.Unlock()
 				c <- 1
-				fmt.Println("Hello from worker 222")
+				//fmt.Println("Hello from worker")
 				return WNormal
 		}
 	} else {
@@ -200,9 +207,9 @@ func mkHearBeat(w *WorkerState, c chan int) {
 		w.l.Lock()
 		for (!w.vaild) {
 			w.l.Unlock()
-			fmt.Println("Stuck!")
+			//fmt.Println("Stuck!")
 			a = <- c 
-			fmt.Println("GO!")
+			//fmt.Println("GO!")
 			if(a == 0) {
 				return
 			}
@@ -297,14 +304,16 @@ func (w *WorkerState) runReduceJob(reducef func(string, []string) string) {
 	//wid := w.wId
 	//nReduce := w.nReduce
 	reduceId := w.reduceId 
+	fmt.Println("Reduce running! ID: ",reduceId)
 	w.l.Unlock()
 	intermediate := []KeyValue{}
 	for _,fileID := range immeFile {
 		file,_ := os.Open(fmt.Sprintf("mr-tmp/IN-WID%v-%v",fileID,reduceId))
 		for {
 			t := KeyValue{}
-			n,err := fmt.Fscanf(file, "%v %v\n", t.Key, t.Value)
+			n,err := fmt.Fscanf(file, "%v %v\n", &t.Key, &t.Value)
 			if	(n<2 || err != nil) {
+				fmt.Println("ERR: ", err)
 				break
 			} else {
 				intermediate = append(intermediate, t)
@@ -313,11 +322,14 @@ func (w *WorkerState) runReduceJob(reducef func(string, []string) string) {
 		file.Close()
 
 	}
-	
 
-	//oname := fmt.Sprintf("WID-%v-mr-out-%v", wid, reduceId)
+	//fmt.Println(intermediate)
+	
+	sort.Sort(ByKey(intermediate))
+
+	//oname := fmt.Sprintf("mr-tmp/WID-%v-mr-out-%v", wid, reduceId)
 	//ofile, _ := os.Create(oname)
-	ofile,_ := os.CreateTemp("./mr-tmp", "")
+	ofile,_ := os.CreateTemp("./mr-out", "")
 
 	i := 0
 	for i < len(intermediate) {
@@ -337,9 +349,8 @@ func (w *WorkerState) runReduceJob(reducef func(string, []string) string) {
 		i = j
 	}
 
-	err := os.Rename(ofile.Name(),fmt.Sprintf("./mr-tmp/mr-out-%v", reduceId))
+	os.Rename(ofile.Name(),fmt.Sprintf("./mr-out/mr-out-%v", reduceId))
 	ofile.Close()
-	fmt.Println(err)
 
 }
 

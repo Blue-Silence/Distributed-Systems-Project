@@ -54,7 +54,7 @@ func MakeCoordinator(files []string, nReduce int) *Coordinator {
 	c := Coordinator{}
 	c.mapInputFiles = make(map[string]*Job)
 	for n,_ := range c.mapInputFiles {
-		c.mapInputFiles[n] = &(Job{})
+		c.mapInputFiles[n] = &(Job{complete : false,vaild : false})
 	}
 	c.reduceInputFiles = make([]Job,nReduce)
 	c.workers.lt = make(map[int64]*WorkerStat,0)
@@ -95,8 +95,8 @@ func MakeCoordinator(files []string, nReduce int) *Coordinator {
 
 
 
-const workerLifeTimeOnServer int64 = 12
-const workerLifeTimeOnWorker int64 = 10
+const workerLifeTimeOnServer int64 = 5
+const workerLifeTimeOnWorker int64 = 4
 
 const (
 	Running		= 0
@@ -173,7 +173,7 @@ func (c *Coordinator) GetJob(args *JobRequest, reply *JobReply) error {
 		case JReduce:
 			job = getFreeReduceJ(c, &c.reduceInputFiles)
 		case JDone:
-			fmt.Println("EXITING!!!")
+			//fmt.Println("EXITING!!!")
 			reply.Vaild = false
 			reply.Exit = true
 	}
@@ -353,9 +353,30 @@ func  getFreeReduceJ(c *Coordinator, m *[]Job) *Job {
 func  forwardStat(c *Coordinator, currentState int) {
 	defer c.l.Unlock()
 	c.l.Lock()
-	if(c.jobType<currentState+1){
-		c.jobType = currentState+1
+	state := JDone 
+
+	for i,_ := range c.reduceInputFiles {
+		j := &c.reduceInputFiles[i]
+		j.l.Lock()
+		if(!j.complete){
+			state = JReduce
+		}
+		j.l.Unlock()
+	}  
+
+	for _,v := range c.mapInputFiles{
+		v.l.Lock()
+		if(!v.complete) {
+			state = JMap
+		}
+
+		v.l.Unlock()
 	}
+
+	c.jobType = state
+	//if(c.jobType<currentState+1){
+	//	c.jobType = currentState+1
+	//}
 
 	//fmt.Println("Fowarding:",c.jobType)
 
