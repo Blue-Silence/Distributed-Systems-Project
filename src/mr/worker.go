@@ -224,9 +224,9 @@ func (w *WorkerState) runJob(mapf func(string, string) []KeyValue,
 	w.l.Lock()
 	switch w.jobType {
 		case JMap :
-			//abababa
+			w.runMapJob(mapf)
 		case JReduce :
-			//abababa
+			w.runReduceJob(reducef)
 	}
 
 }
@@ -254,20 +254,67 @@ func (w *WorkerState) runMapJob(mapf func(string, string) []KeyValue,) {
 
 	var fLt []*os.File 
 	for i:=0;i<nReduce;i++ {
-		n := fmt.Sprintf("WID%v-%v",wid,i)
+		n := fmt.Sprintf("IN-WID%v-%v",wid,i)
 		f,_ := os.Create(n)
 		fLt = append(fLt,f)
 	}
 
 	for _,v := range kva {
-		fmt.Fprintf(fLt[ihash(v.Key)], "%s %s\n", v.Key, v.Value)
+		fmt.Fprintf(fLt[ihash(v.Key)], "%v %v\n", v.Key, v.Value)
 	}
 
 }
 
 func (w *WorkerState) runReduceJob(reducef func(string, []string) string) {
 	immeFile := w.immeFile
-	wid := w.wId
-	nReduce := w.nReduce
+	//wid := w.wId
+	//nReduce := w.nReduce
 	reduceId := w.reduceId 
+	w.l.Unlock()
+	intermediate := []KeyValue{}
+	for _,fileID := range immeFile {
+		file,_ := os.Open(fmt.Sprintf("IN-WID%v-%v",fileID,reduceId))
+		for {
+			t := KeyValue{}
+			n,err := fmt.Fscanf(file, "%v %v\n", t.Key, t.Value)
+			if	(n<2 || err != nil) {
+				break
+			} else {
+				intermediate = append(intermediate, t)
+			}
+		}
+		file.Close()
+
+	}
+	
+
+	//oname := fmt.Sprintf("WID-%v-mr-out-%v", wid, reduceId)
+	//ofile, _ := os.Create(oname)
+	ofile,_ := os.CreateTemp(".", "")
+
+	i := 0
+	for i < len(intermediate) {
+		j := i + 1
+		for j < len(intermediate) && intermediate[j].Key == intermediate[i].Key {
+			j++
+		}
+		values := []string{}
+		for k := i; k < j; k++ {
+			values = append(values, intermediate[k].Value)
+		}
+		output := reducef(intermediate[i].Key, values)
+
+		// this is the correct format for each line of Reduce output.
+		fmt.Fprintf(ofile, "%v %v\n", intermediate[i].Key, output)
+
+		i = j
+	}
+
+	os.Rename(ofile.Name(),fmt.Sprintf("mr-out-%v", reduceId))
+	ofile.Close()
+
 }
+
+
+
+
