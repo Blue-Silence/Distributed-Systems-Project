@@ -288,7 +288,8 @@ func (w *WorkerState) runMapJob(mapf func(string, string) []KeyValue,) {
 
 	var fLt []*os.File 
 	for i:=0;i<nReduce;i++ {
-		n := fmt.Sprintf("/home/usera/6.5840/src/main/tmp/IN-WID%v-%v",wid,i)
+		//n := fmt.Sprintf("/home/usera/6.5840/src/main/tmp/IN-WID%v-%v",wid,i)
+		n := fmt.Sprintf("IN-WID%v-%v",wid,i)
 		f,_ := os.Create(n)
 		fLt = append(fLt,f)
 	}
@@ -308,7 +309,8 @@ func (w *WorkerState) runReduceJob(reducef func(string, []string) string) {
 	w.l.Unlock()
 	intermediate := []KeyValue{}
 	for _,fileID := range immeFile {
-		file,err := os.Open(fmt.Sprintf("/home/usera/6.5840/src/main/tmp/IN-WID%v-%v",fileID,reduceId))
+		//file,err := os.Open(fmt.Sprintf("/home/usera/6.5840/src/main/tmp/IN-WID%v-%v",fileID,reduceId))
+		file,err := os.Open(fmt.Sprintf("IN-WID%v-%v",fileID,reduceId))
 		if(err != nil) {
 			fmt.Println("ERR in open file: ", err)
 		}
