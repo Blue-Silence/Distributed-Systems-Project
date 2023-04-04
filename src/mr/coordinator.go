@@ -37,6 +37,7 @@ func (c *Coordinator) Done() bool {
 	defer c.l.Unlock()
 	if(c.jobType == JDone) {
 		ret = true
+		fmt.Println("Done!")
 	}
 	// Your code here.
 
@@ -95,9 +96,9 @@ func MakeCoordinator(files []string, nReduce int) *Coordinator {
 
 
 
-const workerLifeTimeOnServer int64 = 2
-const workerLifeTimeOnWorker int64 = 1
-const jobLifeTimeOnServer int64 = 20
+const workerLifeTimeOnServer int64 = 6
+const workerLifeTimeOnWorker int64 = 3
+const jobLifeTimeOnServer int64 = 10
 
 const (
 	Running		= 0
@@ -158,9 +159,12 @@ type Coordinator struct {
 
 func (c *Coordinator) GetJob(args *JobRequest, reply *JobReply) error {
 	
+	//fmt.Println("FOR JOB?")
 	reply.Vaild = true
 	reply.Exit = false
+	//fmt.Println("FOR JOB1")
 	c.l.Lock()
+	//fmt.Println("FOR JOB2")
 	jobType := c.jobType
 	reply.NReduce = c.nReduce
 	c.counter++
@@ -168,13 +172,18 @@ func (c *Coordinator) GetJob(args *JobRequest, reply *JobReply) error {
 	var job *Job
 	switch  jobType {
 		case JMap:
+			//fmt.Println("FOR JOB3.1")
 			job = getFreeMapJ(&c.mapInputFiles)
+			//fmt.Println("FOR JOB3.2")
 		case JReduce:
+			//fmt.Println("FOR JOB3.3")
 			job = getFreeReduceJ(c, &c.reduceInputFiles)
+			//fmt.Println("FOR JOB3.4")
 		case JDone:
 			reply.Vaild = false
 			reply.Exit = true
 	}
+	//fmt.Println("FOR JOB3")
 	switch {
 		case reply.Vaild && job != nil :
 			job.vaild = true
@@ -200,7 +209,8 @@ func (c *Coordinator) GetJob(args *JobRequest, reply *JobReply) error {
 			forwardStat(c, jobType)
 			reply.Vaild = false
 		default :
-	}
+	}	
+		//fmt.Println("FOR JOB4")
 		if(reply.Vaild) {
 			fmt.Println("Deliver job:", *reply)
 		}
@@ -230,7 +240,9 @@ func (c *Coordinator) MkHeartBeat(args *HeartBeat, reply *HeartBeatReply) error 
 			} else {
 				reply.State = Running
 			}
+			w.lastHeartBeat = reply.LastHeartBeatT
 	}
+	w.l.Unlock()
 
 	return nil
 }
@@ -249,6 +261,7 @@ func (c *Coordinator) FinishJob(args *JobCompleteSig, reply *int) error {
 	c.l.Unlock()
 
 	j.l.Lock()
+	fmt.Println("GOT Finish!: ",*j)
 	j.complete = true
 	j.fileId = args.WId
 	j.w.l.Lock()
@@ -291,9 +304,13 @@ func  timeExpire(w *WorkerStat) bool {
 
 func  getFreeMapJ(m *map[string]*Job) *Job {
 	for _,j := range *m {
+		//fmt.Println("FOR JOB7.1")
 		j.l.Lock()
+		//fmt.Println("FOR JOB7.2")
 		if(j.vaild){
+			//fmt.Println("FOR JOB7.3")
 			j.w.l.Lock()
+			//fmt.Println("FOR JOB7.4")
 			if(!j.complete && timeExpire(j.w)) {
 				j.w.l.Unlock()
 				return j

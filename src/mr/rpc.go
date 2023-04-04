@@ -12,6 +12,7 @@ import "strconv"
 
 
 type JobRequest struct {
+	Tag int64
 }
 
 type JobReply struct {

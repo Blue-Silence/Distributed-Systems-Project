@@ -11,6 +11,8 @@ import "os"
 import "io/ioutil"
 import "sort"
 
+import "math/rand"
+
 // for sorting by key.
 type ByKey []KeyValue
 
@@ -30,6 +32,7 @@ type KeyValue struct {
 type WorkerState struct {
 	l sync.Mutex
 	vaild bool
+	state int
 	wId int64
 	jobType int 
 	file string 
@@ -76,14 +79,23 @@ func Worker(mapf func(string, string) []KeyValue,
 
 		switch state.getJob(heartBeatChan){
 			case WEmptyJob :
+				//fmt.Println("Empty")
 				continue 
 			case WCallFail : 
+				//fmt.Println("Fail")
 				continue 
 			case WExit : 
+			//fmt.Println("EXIT")
 				return
 			case WNormal :
+			//	fmt.Println("In ")
 				state.runJob(mapf, reducef)
+			//	fmt.Println("Out ")
+				fmt.Println("Ababababa")
 				mkCompleteSig(&state)
+			//	fmt.Println("Complete")
+			default :
+				fmt.Println("WAHT?")
 
 		}
 	}
@@ -118,10 +130,15 @@ func call(rpcname string, args interface{}, reply interface{}) bool {
 
 
 func (w *WorkerState) getJob(c chan int) int {
+	rand.Int63()
 	args := JobRequest{}
+	//args := JobRequest{Tag : rand.Int63()}
 	reply := JobReply{}
-
+	//fmt.Println("Here")
 	ok := call("Coordinator.GetJob", &args, &reply)
+	if(reply.Vaild) {
+	fmt.Println("GotJob",ok,reply)
+	}
 	if ok {
 		switch {
 			case reply.Vaild == false && reply.Exit == false:
@@ -132,7 +149,9 @@ func (w *WorkerState) getJob(c chan int) int {
 				w.l.Unlock()
 				return WExit
 			default : 
+				//fmt.Println("BEFORE")
 				w.l.Lock()
+				//fmt.Println("AFTER")
 				w.vaild = reply.Vaild
 				w.wId = reply.WId
 				w.jobType = reply.JobType
@@ -142,8 +161,9 @@ func (w *WorkerState) getJob(c chan int) int {
 				w.lease = reply.Lease
 				w.nReduce = reply.NReduce
 				w.immeFile = reply.ImmeFile
+				w.state = Running
 				w.l.Unlock()
-				c <- 1
+				//c <- 1
 				return WNormal
 		}
 	} else {
@@ -156,10 +176,10 @@ func mkHearBeat(w *WorkerState, c chan int) {
 
 	var args HeartBeat
 	var reply HeartBeatReply
-	var a int 
+	//var a int 
 	for {
 
-		w.l.Lock()
+		/*w.l.Lock()
 		for (!w.vaild) {
 			w.l.Unlock()
 			a = <- c 
@@ -167,14 +187,21 @@ func mkHearBeat(w *WorkerState, c chan int) {
 				return
 			}
 			w.l.Lock()
-		}	
+		}*/
+		
+		w.l.Lock() 
+		if (!w.vaild || w.state == Killed) {
+			w.l.Unlock()
+			time.Sleep(2 * time.Second)
+			continue 
+		}
 		args = HeartBeat{Wid : w.wId, SendTime: time.Now().Unix()}
-		ok := call("Coordinator.GetJob", &args, &reply)
+		ok := call("Coordinator.MkHeartBeat", &args, &reply)
 		switch {
 			case !ok :
-				w.vaild = false
+				w.state = Killed
 			case reply.State == Killed || reply.State == Exit :
-				w.vaild = false
+				w.state = Killed
 			default :
 				w.lastHeartBeatT = reply.LastHeartBeatT
 				w.lease = reply.Lease
@@ -188,11 +215,16 @@ func mkHearBeat(w *WorkerState, c chan int) {
 }
 
 func mkCompleteSig(w *WorkerState) {
+	fmt.Println("Before lock")
 	w.l.Lock()
+	fmt.Println("After lock")
 	//defer w.l.Unlock()
 	if(!w.vaild){
+		w.l.Unlock()
+		fmt.Println("After lock2")
 		return
 	}
+	fmt.Println("After loc3")
 	args := JobCompleteSig{WId : w.wId, 
 							JobType : w.jobType,
 							MapFile : w.file,
@@ -200,7 +232,10 @@ func mkCompleteSig(w *WorkerState) {
 						}
 	w.vaild = false
 	var reply int 
+	fmt.Println("After lock4")
 	w.l.Unlock()
+	fmt.Println("After lock5")
+	fmt.Println("Finish!: ",args)
 	call("Coordinator.FinishJob", &args, &reply)
 
 }
@@ -253,7 +288,7 @@ func (w *WorkerState) runMapJob(mapf func(string, string) []KeyValue,) {
 func (w *WorkerState) runReduceJob(reducef func(string, []string) string) {
 	immeFile := w.immeFile
 	reduceId := w.reduceId 
-
+	fmt.Println("Run reduce id: ",reduceId)
 	w.l.Unlock()
 	intermediate := []KeyValue{}
 	for _,fileID := range immeFile {
@@ -273,11 +308,11 @@ func (w *WorkerState) runReduceJob(reducef func(string, []string) string) {
 		file.Close()
 
 	}
-	
+	fmt.Println("Hello")
 	sort.Sort(ByKey(intermediate))
 
 	ofile,_ := os.CreateTemp("","*")
-
+	fmt.Println("It's")
 	i := 0
 	for i < len(intermediate) {
 		j := i + 1
@@ -288,16 +323,18 @@ func (w *WorkerState) runReduceJob(reducef func(string, []string) string) {
 		for k := i; k < j; k++ {
 			values = append(values, intermediate[k].Value)
 		}
+		fmt.Println("ME")
 		output := reducef(intermediate[i].Key, values)
-
+		fmt.Println("I Have")
 		// this is the correct format for each line of Reduce output.
 		fmt.Fprintf(ofile, "%v %v\n", intermediate[i].Key, output)
-
+		fmt.Println("been")
 		i = j
 	}
-
+	fmt.Println("wandering")
 	os.Rename(ofile.Name(),fmt.Sprintf("./mr-out-%v", reduceId))
 	ofile.Close()
+	fmt.Println("AROUND : ",reduceId)
 
 }
 
