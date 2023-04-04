@@ -159,12 +159,9 @@ type Coordinator struct {
 
 func (c *Coordinator) GetJob(args *JobRequest, reply *JobReply) error {
 	
-	//fmt.Println("FOR JOB?")
 	reply.Vaild = true
 	reply.Exit = false
-	//fmt.Println("FOR JOB1")
 	c.l.Lock()
-	//fmt.Println("FOR JOB2")
 	jobType := c.jobType
 	reply.NReduce = c.nReduce
 	c.counter++
@@ -172,18 +169,13 @@ func (c *Coordinator) GetJob(args *JobRequest, reply *JobReply) error {
 	var job *Job
 	switch  jobType {
 		case JMap:
-			//fmt.Println("FOR JOB3.1")
 			job = getFreeMapJ(&c.mapInputFiles)
-			//fmt.Println("FOR JOB3.2")
 		case JReduce:
-			//fmt.Println("FOR JOB3.3")
 			job = getFreeReduceJ(c, &c.reduceInputFiles)
-			//fmt.Println("FOR JOB3.4")
 		case JDone:
 			reply.Vaild = false
 			reply.Exit = true
 	}
-	//fmt.Println("FOR JOB3")
 	switch {
 		case reply.Vaild && job != nil :
 			job.vaild = true
@@ -206,11 +198,10 @@ func (c *Coordinator) GetJob(args *JobRequest, reply *JobReply) error {
 
 		case !reply.Vaild : 
 		case job == nil : 
-			forwardStat(c, jobType)
+			forwardStat(c)
 			reply.Vaild = false
 		default :
 	}	
-		//fmt.Println("FOR JOB4")
 		if(reply.Vaild) {
 			fmt.Println("Deliver job:", *reply)
 		}
@@ -261,7 +252,7 @@ func (c *Coordinator) FinishJob(args *JobCompleteSig, reply *int) error {
 	c.l.Unlock()
 
 	j.l.Lock()
-	fmt.Println("GOT Finish!: ",*j)
+	fmt.Println("GOT Finish: ",*j)
 	j.complete = true
 	j.fileId = args.WId
 	j.w.l.Lock()
@@ -304,13 +295,9 @@ func  timeExpire(w *WorkerStat) bool {
 
 func  getFreeMapJ(m *map[string]*Job) *Job {
 	for _,j := range *m {
-		//fmt.Println("FOR JOB7.1")
 		j.l.Lock()
-		//fmt.Println("FOR JOB7.2")
 		if(j.vaild){
-			//fmt.Println("FOR JOB7.3")
 			j.w.l.Lock()
-			//fmt.Println("FOR JOB7.4")
 			if(!j.complete && timeExpire(j.w)) {
 				j.w.l.Unlock()
 				return j
@@ -355,7 +342,7 @@ func  getFreeReduceJ(c *Coordinator, m *[]Job) *Job {
 	return nil
 }
 
-func  forwardStat(c *Coordinator, currentState int) {
+func  forwardStat(c *Coordinator) {
 	defer c.l.Unlock()
 	c.l.Lock()
 	state := JDone 
