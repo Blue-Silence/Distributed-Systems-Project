@@ -26,7 +26,7 @@ import (
 
 	//	"6.5840/labgob"
 	"6.5840/labrpc"
-	"fmt"
+	//"fmt"
 )
 
 
@@ -87,7 +87,7 @@ func (rf *Raft) GetState() (int, bool) {
 	isleader = rf.isLeader
 	rf.mu.Unlock()
 
-	fmt.Println("GetState term:", term, " isLeader:", isleader , "  ID: ", rf.me)
+	//fmt.Println("GetState term:", term, " isLeader:", isleader , "  ID: ", rf.me)
 	return term, isleader
 }
 
@@ -164,17 +164,17 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	// Your code here (2A, 2B).
 	rf.mu.Lock()
 	if(args.Term>rf.termVoted) {
-		fmt.Println("Vote for term:", args.Term, " ID: ", rf.me , "  From:",args.From , "  termVoted: ", rf.termVoted)
+		//fmt.Println("Vote for term:", args.Term, " ID: ", rf.me , "  From:",args.From , "  termVoted: ", rf.termVoted)
 		rf.termVoted = args.Term 
-		//fmt.Println("  termVoted: ", rf.termVoted)
+		////fmt.Println("  termVoted: ", rf.termVoted)
 		reply.VoteGranted = true
 		//if(rf.isLeader) {
-		//	fmt.Println("Leadersgio clear : A", rf.term, "ID: ", rf.me, "  From:",args.From)
+		//	//fmt.Println("Leadersgio clear : A", rf.term, "ID: ", rf.me, "  From:",args.From)
 		//}
 		//rf.isLeader = false
 		
 	} else {
-		fmt.Println("Refuse to vote for term:", args.Term, " ID: ", rf.me , "  From:",args.From , "  termVoted: ", rf.termVoted)
+		//fmt.Println("Refuse to vote for term:", args.Term, " ID: ", rf.me , "  From:",args.From , "  termVoted: ", rf.termVoted)
 		reply.VoteGranted = false
 	}
 	rf.mu.Unlock()
@@ -209,7 +209,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		reply.Success = true
 		rf.recvHeartbeat = true
 		if(rf.isLeader) {
-			fmt.Println("Leadersgio clear : B", rf.term, "ID: ", rf.me , " newTerm:",args.Term, "  From:",args.From)
+			//fmt.Println("Leadersgio clear : B", rf.term, "ID: ", rf.me , " newTerm:",args.Term, "  From:",args.From)
 		}
 		rf.term = args.Term
 		rf.isLeader = false
@@ -321,7 +321,7 @@ func (rf *Raft) ticker() {
 		if (!f && !isLeader) {
 			rf.mu.Lock()
 			rf.termVoted ++
-			fmt.Println("Timer expired!", "ID: ", rf.me, "  termVoted:", rf.termVoted)
+			//fmt.Println("Timer expired!", "ID: ", rf.me, "  termVoted:", rf.termVoted)
 			term := rf.termVoted
 			rf.mu.Unlock()
 			
@@ -344,17 +344,17 @@ func (rf *Raft) ticker() {
 				
 					//maxTerm = reply.Term	
 			}
-			ms := (1000 + (rand.Int63() % 1000))
+			ms := (1000 + (rand.Int63() % 1000))/5
 			time.Sleep(time.Duration(ms) * time.Millisecond)
 
 			rf.mu.Lock()
 			if (voted > num/2 && term > rf.term) {
 				rf.term = term
 				rf.isLeader = true 
-				fmt.Println("Election succeeded : ", term, "ID: ", rf.me)
+				//fmt.Println("Election succeeded : ", term, "ID: ", rf.me)
 				//rf.mkHeartBeat()
 			} else {
-				fmt.Println("Election failed : ", term, "ID: ", rf.me)
+				//fmt.Println("Election failed : ", term, "ID: ", rf.me)
 				//rf.term = maxTerm
 				rf.isLeader = false
 
@@ -406,7 +406,7 @@ func (rf *Raft) mkHeartBeat() {
 					if (!reply.Success) {
 						rf.mu.Lock()
 						if(rf.isLeader) {
-							fmt.Println("Leadersgio clear : C", rf.term, "ID: ", rf.me, "  From:", reply.From)
+							//fmt.Println("Leadersgio clear : C", rf.term, "ID: ", rf.me, "  From:", reply.From)
 						}
 						rf.isLeader = false 
 						if(rf.term < reply.Term) {
