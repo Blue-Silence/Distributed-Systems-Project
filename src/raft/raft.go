@@ -344,7 +344,7 @@ func (rf *Raft) ticker() {
 				
 					//maxTerm = reply.Term	
 			}
-			ms := (1000 + (rand.Int63() % 3000))
+			ms := (1000 + (rand.Int63() % 1000))
 			time.Sleep(time.Duration(ms) * time.Millisecond)
 
 			rf.mu.Lock()
@@ -352,6 +352,7 @@ func (rf *Raft) ticker() {
 				rf.term = term
 				rf.isLeader = true 
 				fmt.Println("Election succeeded : ", term, "ID: ", rf.me)
+				//rf.mkHeartBeat()
 			} else {
 				fmt.Println("Election failed : ", term, "ID: ", rf.me)
 				//rf.term = maxTerm
@@ -362,7 +363,7 @@ func (rf *Raft) ticker() {
 		} else {
 			// pause for a random amount of time between 50 and 350
 			// milliseconds.
-			ms := (50 + (rand.Int63() % 3000))
+			ms := (500 + (rand.Int63() % 300))
 			time.Sleep(time.Duration(ms) * time.Millisecond)
 		}
 		
@@ -402,15 +403,18 @@ func (rf *Raft) mkHeartBeat() {
 					reply := AppendEntriesReply{}
 					args := AppendEntriesArgs{Term : term,  From : rf.me}
 					rf.sendAppendEntries(i, &args, &reply)
-					/*if (!reply.Success) {
+					if (!reply.Success) {
 						rf.mu.Lock()
 						if(rf.isLeader) {
 							fmt.Println("Leadersgio clear : C", rf.term, "ID: ", rf.me, "  From:", reply.From)
 						}
 						rf.isLeader = false 
-						rf.term = reply.Term
+						if(rf.term < reply.Term) {
+							rf.term = reply.Term
+						}
+						
 						rf.mu.Unlock()
-					}*/
+					}
 				}(i)
 
 			}
