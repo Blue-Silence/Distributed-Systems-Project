@@ -97,7 +97,7 @@ func (rf *Raft) GetState() (int, bool) {
 	//isleader = rf.isLeader
 	rf.mu.Unlock()
 
-	fmt.Println("GetState term:", term, " state:", rf.state , "  ID: ", rf.me)
+	//fmt.Println("GetState term:", term, " state:", rf.state , "  ID: ", rf.me)
 	return term, isleader
 }
 
@@ -172,9 +172,9 @@ type RequestVoteReply struct {
 // example RequestVote RPC handler.
 func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	// Your code here (2A, 2B).
-	fmt.Println("Enter vote.ID:", rf.me)
+	////fmt.Println("Enter vote.ID:", rf.me)
 	rf.mu.Lock()
-	fmt.Println("Exit vote.ID:", rf.me)
+	////fmt.Println("Exit vote.ID:", rf.me)
 	reply.Term = args.Term
 	switch {
 		case args.Term>rf.term :
@@ -183,18 +183,18 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 			rf.term = args.Term 
 			rf.voteFor = &args.From 
 			reply.VoteGranted = true
-			fmt.Println("Vote for:",args.From, " From ID:", rf.me, " in term:",args.Term)
+			//fmt.Println("Vote for:",args.From, " From ID:", rf.me, " in term:",args.Term)
 		case args.Term == rf.term && rf.voteFor == nil :
 			rf.voteFor = &args.From 
 			reply.VoteGranted = true 
-			fmt.Println("Vote for:",args.From, " From ID:", rf.me, " in term:",args.Term)
+			//fmt.Println("Vote for:",args.From, " From ID:", rf.me, " in term:",args.Term)
 			rf.state = follower
 		default :
 			reply.Term = rf.term
 			reply.VoteGranted = false
-			fmt.Println("Refuse to vote for:",args.From, " From ID:", rf.me, " for term:",args.Term, "   self-term:",rf.term)
+			//fmt.Println("Refuse to vote for:",args.From, " From ID:", rf.me, " for term:",args.Term, "   self-term:",rf.term)
 			if(rf.term == args.Term){
-				fmt.Println("Already vote for:",*rf.voteFor)
+				//fmt.Println("Already vote for:",*rf.voteFor)
 			}
 	}
 	rf.mu.Unlock()
@@ -224,7 +224,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	rf.mu.Lock()
 	if(args.Term>=rf.term) {
 		if(args.Term>rf.term){
-			fmt.Println("Term change (APPEND) from:",rf.term," to:",args.Term," in ID:",rf.me)
+			//fmt.Println("Term change (APPEND) from:",rf.term," to:",args.Term," in ID:",rf.me)
 		}
 		
 		reply.Term = args.Term 
@@ -233,7 +233,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		reply.Success = true
 		rf.recvHeartbeat = true
 		if(rf.state == leader) {
-			fmt.Println("Leadersgio clear : B", rf.term, "ID: ", rf.me , " newTerm:",args.Term, "  From:",args.From)
+			//fmt.Println("Leadersgio clear : B", rf.term, "ID: ", rf.me , " newTerm:",args.Term, "  From:",args.From)
 		}
 		rf.term = args.Term
 		rf.state = follower
@@ -347,7 +347,7 @@ func (rf *Raft) ticker() {
 			rf.mu.Lock()
 			rf.state = candidate
 			rf.term ++
-			fmt.Println("Timer expired!", "ID: ", rf.me, "  term:", rf.term)
+			//fmt.Println("Timer expired!", "ID: ", rf.me, "  term:", rf.term)
 			term := rf.term
 			rf.voteFor = &rf.me
 			state := rf.state
@@ -377,7 +377,7 @@ func (rf *Raft) ticker() {
 						
 						if(reply.Term>rf.term){
 							rf.state = follower
-							fmt.Println("Term change (GETVOTE) from:",rf.term," to:",reply.Term," in ID:",rf.me)
+							//fmt.Println("Term change (GETVOTE) from:",rf.term," to:",reply.Term," in ID:",rf.me)
 							rf.term = reply.Term
 						}
 						
@@ -387,11 +387,13 @@ func (rf *Raft) ticker() {
 				
 					//maxTerm = reply.Term	
 			}
-			ms := (100 + (rand.Int63() % 100))
+			//ms := (100 + (rand.Int63() % 100))
+			ms := 10
 			for i := 0;i<10;i++{
 				rf.mu.Lock()
 				if(voted > num/2 || rf.state != candidate) {
 					rf.mu.Unlock()
+					//fmt.Println("Take ", ms*(i+1), "ms")
 					break
 					
 				}
@@ -464,11 +466,11 @@ func (rf *Raft) mkHeartBeat() {
 					if (!reply.Success) {
 						rf.mu.Lock()
 						if(rf.state == leader) {
-							fmt.Println("Leadersgio clear : C", rf.term, "ID: ", rf.me, "  From:", reply.From)
+							//fmt.Println("Leadersgio clear : C", rf.term, "ID: ", rf.me, "  From:", reply.From)
 						}
 						rf.state = follower 
 						if(rf.term < reply.Term) {
-							fmt.Println("Term change (SEND HEARTBEAT) from:",rf.term," to:",reply.Term," in ID:",rf.me)
+							//fmt.Println("Term change (SEND HEARTBEAT) from:",rf.term," to:",reply.Term," in ID:",rf.me)
 							rf.term = reply.Term
 						}
 						
