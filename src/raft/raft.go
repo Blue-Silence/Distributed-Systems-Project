@@ -26,7 +26,7 @@ import (
 
 	//	"6.5840/labgob"
 	"6.5840/labrpc"
-	//"fmt"
+	"fmt"
 )
 
 
@@ -65,7 +65,8 @@ type Raft struct {
 	// state a Raft server must maintain.
 	leader int 
 	term int
-	termVoted int
+	//termVoted int
+	voteFor *int
 	//state int
 	isLeader bool 
 	recvHeartbeat bool
@@ -87,7 +88,7 @@ func (rf *Raft) GetState() (int, bool) {
 	isleader = rf.isLeader
 	rf.mu.Unlock()
 
-	//fmt.Println("GetState term:", term, " isLeader:", isleader , "  ID: ", rf.me)
+	fmt.Println("GetState term:", term, " isLeader:", isleader , "  ID: ", rf.me)
 	return term, isleader
 }
 
@@ -163,19 +164,23 @@ type RequestVoteReply struct {
 func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	// Your code here (2A, 2B).
 	rf.mu.Lock()
-	if(args.Term>rf.termVoted) {
-		//fmt.Println("Vote for term:", args.Term, " ID: ", rf.me , "  From:",args.From , "  termVoted: ", rf.termVoted)
-		rf.termVoted = args.Term 
-		////fmt.Println("  termVoted: ", rf.termVoted)
-		reply.VoteGranted = true
-		//if(rf.isLeader) {
-		//	//fmt.Println("Leadersgio clear : A", rf.term, "ID: ", rf.me, "  From:",args.From)
-		//}
-		//rf.isLeader = false
-		
-	} else {
-		//fmt.Println("Refuse to vote for term:", args.Term, " ID: ", rf.me , "  From:",args.From , "  termVoted: ", rf.termVoted)
-		reply.VoteGranted = false
+	reply.Term = args.Term
+	switch {
+		case args.Term>rf.term :
+			rf.isLeader = false
+			rf.term = args.Term 
+			rf.voteFor = &args.From 
+			reply.VoteGranted = true
+			fmt.Println("Vote for:",args.From, " From ID:", rf.me, " in term:",args.Term)
+		case args.Term == rf.term && rf.voteFor == nil :
+			rf.voteFor = &args.From 
+			reply.VoteGranted = true 
+			fmt.Println("Vote for:",args.From, " From ID:", rf.me, " in term:",args.Term)
+			rf.isLeader = false
+		default :
+			reply.Term = rf.term
+			reply.VoteGranted = false
+			fmt.Println("Refuse to vote for:",args.From, " From ID:", rf.me, " in term:",args.Term)
 	}
 	rf.mu.Unlock()
 
@@ -209,10 +214,11 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		reply.Success = true
 		rf.recvHeartbeat = true
 		if(rf.isLeader) {
-			//fmt.Println("Leadersgio clear : B", rf.term, "ID: ", rf.me , " newTerm:",args.Term, "  From:",args.From)
+			fmt.Println("Leadersgio clear : B", rf.term, "ID: ", rf.me , " newTerm:",args.Term, "  From:",args.From)
 		}
 		rf.term = args.Term
 		rf.isLeader = false
+		rf.voteFor = nil
 	} else {
 		reply.Success = false
 		reply.Term = rf.term
@@ -320,9 +326,10 @@ func (rf *Raft) ticker() {
 
 		if (!f && !isLeader) {
 			rf.mu.Lock()
-			rf.termVoted ++
-			//fmt.Println("Timer expired!", "ID: ", rf.me, "  termVoted:", rf.termVoted)
-			term := rf.termVoted
+			rf.term ++
+			fmt.Println("Timer expired!", "ID: ", rf.me, "  term:", rf.term)
+			term := rf.term
+			rf.voteFor = &rf.me
 			rf.mu.Unlock()
 			
 			num := 0
@@ -348,13 +355,14 @@ func (rf *Raft) ticker() {
 			time.Sleep(time.Duration(ms) * time.Millisecond)
 
 			rf.mu.Lock()
-			if (voted > num/2 && term > rf.term) {
+			if (voted > num/2){ //&& term >= rf.term) {
+				rf.voteFor = &rf.me
 				rf.term = term
 				rf.isLeader = true 
-				//fmt.Println("Election succeeded : ", term, "ID: ", rf.me)
+				fmt.Println("Election succeeded : ", term, "ID: ", rf.me)
 				//rf.mkHeartBeat()
 			} else {
-				//fmt.Println("Election failed : ", term, "ID: ", rf.me)
+				fmt.Println("Election failed : ", term, "ID: ", rf.me)
 				//rf.term = maxTerm
 				rf.isLeader = false
 
@@ -406,7 +414,7 @@ func (rf *Raft) mkHeartBeat() {
 					if (!reply.Success) {
 						rf.mu.Lock()
 						if(rf.isLeader) {
-							//fmt.Println("Leadersgio clear : C", rf.term, "ID: ", rf.me, "  From:", reply.From)
+							fmt.Println("Leadersgio clear : C", rf.term, "ID: ", rf.me, "  From:", reply.From)
 						}
 						rf.isLeader = false 
 						if(rf.term < reply.Term) {
@@ -440,7 +448,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.me = me
 
 	rf.term = 0
-	rf.termVoted = 0
+	//rf.termVoted = 0
 	rf.leader = 0
 	rf.isLeader = false
 	rf.recvHeartbeat = false
