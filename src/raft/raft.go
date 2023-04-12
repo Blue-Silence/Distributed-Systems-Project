@@ -51,6 +51,12 @@ type ApplyMsg struct {
 	SnapshotIndex int
 }
 
+const (
+	follower int 	= 0
+	candidate 		= 1
+	leader			= 2
+)
+
 
 // A Go object implementing a single Raft peer.
 type Raft struct {
@@ -67,8 +73,8 @@ type Raft struct {
 	term int
 	//termVoted int
 	voteFor *int
-	//state int
-	isLeader bool 
+	state int
+	//isLeader bool 
 	recvHeartbeat bool
 
 }
@@ -79,16 +85,19 @@ type Raft struct {
 func (rf *Raft) GetState() (int, bool) {
 
 	var term int
-	var isleader bool
+	var isleader bool = false
 	// Your code here (2A).
 
 	//rf.mkHeartBeat()
 	rf.mu.Lock()
 	term = rf.term
-	isleader = rf.isLeader
+	if(rf.state == leader){
+		isleader = true
+	}
+	//isleader = rf.isLeader
 	rf.mu.Unlock()
 
-	fmt.Println("GetState term:", term, " isLeader:", isleader , "  ID: ", rf.me)
+	fmt.Println("GetState term:", term, " state:", rf.state , "  ID: ", rf.me)
 	return term, isleader
 }
 
@@ -163,11 +172,14 @@ type RequestVoteReply struct {
 // example RequestVote RPC handler.
 func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	// Your code here (2A, 2B).
+	fmt.Println("Enter vote.ID:", rf.me)
 	rf.mu.Lock()
+	fmt.Println("Exit vote.ID:", rf.me)
 	reply.Term = args.Term
 	switch {
 		case args.Term>rf.term :
-			rf.isLeader = false
+			rf.state = follower
+			rf.voteFor = nil
 			rf.term = args.Term 
 			rf.voteFor = &args.From 
 			reply.VoteGranted = true
@@ -176,14 +188,17 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 			rf.voteFor = &args.From 
 			reply.VoteGranted = true 
 			fmt.Println("Vote for:",args.From, " From ID:", rf.me, " in term:",args.Term)
-			rf.isLeader = false
+			rf.state = follower
 		default :
 			reply.Term = rf.term
 			reply.VoteGranted = false
-			fmt.Println("Refuse to vote for:",args.From, " From ID:", rf.me, " in term:",args.Term)
+			fmt.Println("Refuse to vote for:",args.From, " From ID:", rf.me, " for term:",args.Term, "   self-term:",rf.term)
+			if(rf.term == args.Term){
+				fmt.Println("Already vote for:",*rf.voteFor)
+			}
 	}
 	rf.mu.Unlock()
-
+	
 }
 
 type AppendEntriesArgs struct {
@@ -208,16 +223,20 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	reply.From = rf.me
 	rf.mu.Lock()
 	if(args.Term>=rf.term) {
+		if(args.Term>rf.term){
+			fmt.Println("Term change (APPEND) from:",rf.term," to:",args.Term," in ID:",rf.me)
+		}
+		
 		reply.Term = args.Term 
 		 
 		rf.leader = args.LeaderId
 		reply.Success = true
 		rf.recvHeartbeat = true
-		if(rf.isLeader) {
+		if(rf.state == leader) {
 			fmt.Println("Leadersgio clear : B", rf.term, "ID: ", rf.me , " newTerm:",args.Term, "  From:",args.From)
 		}
 		rf.term = args.Term
-		rf.isLeader = false
+		rf.state = follower
 		rf.voteFor = nil
 	} else {
 		reply.Success = false
@@ -315,7 +334,7 @@ func (rf *Raft) ticker() {
 		 
 		rf.mu.Lock()
 		f := rf.recvHeartbeat
-		isLeader := rf.isLeader
+		state := rf.state
 		peers := rf.peers
 		me := rf.me
 
@@ -324,18 +343,25 @@ func (rf *Raft) ticker() {
 
 		//maxTerm := 0
 
-		if (!f && !isLeader) {
+		if (!f && state == follower) {
 			rf.mu.Lock()
+			rf.state = candidate
 			rf.term ++
 			fmt.Println("Timer expired!", "ID: ", rf.me, "  term:", rf.term)
 			term := rf.term
 			rf.voteFor = &rf.me
+			state := rf.state
 			rf.mu.Unlock()
 			
 			num := 0
 			voted := 1
 			for i,_ := range peers {
-				
+				rf.mu.Lock()
+				state = rf.state
+				rf.mu.Unlock()
+				if(state!=candidate) {
+					break
+				}
 				num ++
 				if(i == me) {
 					continue
@@ -344,30 +370,54 @@ func (rf *Raft) ticker() {
 					args := RequestVoteArgs{Term : term,  From : rf.me}
 					reply := RequestVoteReply{}
 					rf.sendRequestVote(i, &args, &reply)
+					rf.mu.Lock()
 					if (reply.VoteGranted) {
 						voted ++
+					} else {
+						
+						if(reply.Term>rf.term){
+							rf.state = follower
+							fmt.Println("Term change (GETVOTE) from:",rf.term," to:",reply.Term," in ID:",rf.me)
+							rf.term = reply.Term
+						}
+						
 					}
+					rf.mu.Unlock()
 				}(i)
 				
 					//maxTerm = reply.Term	
 			}
-			ms := (1000 + (rand.Int63() % 1000))/5
-			time.Sleep(time.Duration(ms) * time.Millisecond)
+			ms := (100 + (rand.Int63() % 100))
+			for i := 0;i<10;i++{
+				rf.mu.Lock()
+				if(voted > num/2 || rf.state != candidate) {
+					rf.mu.Unlock()
+					break
+					
+				}
+				rf.mu.Unlock()
+				time.Sleep(time.Duration(ms) * time.Millisecond)
+			}
+			
 
 			rf.mu.Lock()
-			if (voted > num/2){ //&& term >= rf.term) {
+			if (voted > num/2 && rf.state == candidate) {
 				rf.voteFor = &rf.me
 				rf.term = term
-				rf.isLeader = true 
+				rf.state = leader 
 				fmt.Println("Election succeeded : ", term, "ID: ", rf.me)
+				rf.mu.Unlock()
 				//rf.mkHeartBeat()
 			} else {
 				fmt.Println("Election failed : ", term, "ID: ", rf.me)
 				//rf.term = maxTerm
-				rf.isLeader = false
+				rf.state = follower
+				rf.mu.Unlock()
+				ms := (500 + (rand.Int63() % 300))
+				time.Sleep(time.Duration(ms) * time.Millisecond)
 
 			}
-			rf.mu.Unlock()
+			
 		} else {
 			// pause for a random amount of time between 50 and 350
 			// milliseconds.
@@ -395,12 +445,12 @@ func (rf *Raft) mkHeartBeat() {
 
 		rf.mu.Lock()
 		term := rf.term
-		isLeader := rf.isLeader
+		state := rf.state
 		peers := rf.peers
 		me := rf.me
 		rf.mu.Unlock()
 
-		if (isLeader) {
+		if (state == leader) {
 			
 			for i,_ := range peers {
 
@@ -413,11 +463,12 @@ func (rf *Raft) mkHeartBeat() {
 					rf.sendAppendEntries(i, &args, &reply)
 					if (!reply.Success) {
 						rf.mu.Lock()
-						if(rf.isLeader) {
+						if(rf.state == leader) {
 							fmt.Println("Leadersgio clear : C", rf.term, "ID: ", rf.me, "  From:", reply.From)
 						}
-						rf.isLeader = false 
+						rf.state = follower 
 						if(rf.term < reply.Term) {
+							fmt.Println("Term change (SEND HEARTBEAT) from:",rf.term," to:",reply.Term," in ID:",rf.me)
 							rf.term = reply.Term
 						}
 						
@@ -450,7 +501,8 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.term = 0
 	//rf.termVoted = 0
 	rf.leader = 0
-	rf.isLeader = false
+	//rf.isLeader = false
+	rf.state = follower
 	rf.recvHeartbeat = false
 	// Your initialization code here (2A, 2B, 2C).
 
