@@ -58,6 +58,11 @@ const (
 )
 
 
+type LogInfo struct {
+	LastTerm int 
+	LastIndex int
+}
+
 // A Go object implementing a single Raft peer.
 type Raft struct {
 	mu        sync.Mutex          // Lock to protect shared access to this peer's state
@@ -69,13 +74,18 @@ type Raft struct {
 	// Your data here (2A, 2B, 2C).
 	// Look at the paper's Figure 2 for a description of what
 	// state a Raft server must maintain.
-	leader int 
+	
+	// 2A
+	leaderID int 
 	term int
 	//termVoted int
 	voteFor *int
 	state int
 	//isLeader bool 
 	recvHeartbeat bool
+
+	//2B
+	tailLogInfo LogInfo
 
 }
 
@@ -157,6 +167,7 @@ type RequestVoteArgs struct {
 	// Your data here (2A, 2B).
 	Term int
 	From int
+	TailLogInfo LogInfo
 }
 
 // example RequestVote RPC reply structure.
@@ -197,6 +208,11 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 				//fmt.Println("Already vote for:",*rf.voteFor)
 			}
 	}
+
+	if !(args.TailLogInfo.LastTerm > rf.tailLogInfo.LastTerm || ((args.TailLogInfo.LastTerm == rf.tailLogInfo.LastTerm) && (args.TailLogInfo.LastIndex >= rf.tailLogInfo.LastIndex))) {
+		reply.VoteGranted = false
+	}  
+	
 	rf.mu.Unlock()
 	
 }
@@ -221,27 +237,32 @@ type AppendEntriesReply struct {
 
 func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply) {
 	reply.From = rf.me
+	reply.Success = true
 	rf.mu.Lock()
 	if(args.Term>=rf.term) {
-		if(args.Term>rf.term){
+		//if(args.Term>rf.term){
 			//fmt.Println("Term change (APPEND) from:",rf.term," to:",args.Term," in ID:",rf.me)
+		//}
+		
+		if(args.Term > rf.term){
+			rf.voteFor = nil
+			reply.Term = args.Term 
 		}
 		
-		reply.Term = args.Term 
-		 
-		rf.leader = args.LeaderId
-		reply.Success = true
+		rf.leaderID = args.LeaderId
 		rf.recvHeartbeat = true
-		if(rf.state == leader) {
+		//if(rf.state == leader) {
 			//fmt.Println("Leadersgio clear : B", rf.term, "ID: ", rf.me , " newTerm:",args.Term, "  From:",args.From)
-		}
+		//}
 		rf.term = args.Term
 		rf.state = follower
-		rf.voteFor = nil
+		
 	} else {
 		reply.Success = false
 		reply.Term = rf.term
 	}
+
+	
 	rf.mu.Unlock()
 
 }
@@ -351,6 +372,7 @@ func (rf *Raft) ticker() {
 			term := rf.term
 			rf.voteFor = &rf.me
 			state := rf.state
+			logInfo := rf.tailLogInfo
 			rf.mu.Unlock()
 			
 			num := 0
@@ -367,7 +389,7 @@ func (rf *Raft) ticker() {
 					continue
 				}
 				go func(i int) {
-					args := RequestVoteArgs{Term : term,  From : rf.me}
+					args := RequestVoteArgs{Term : term,  From : rf.me, TailLogInfo : logInfo}
 					reply := RequestVoteReply{}
 					rf.sendRequestVote(i, &args, &reply)
 					rf.mu.Lock()
@@ -463,16 +485,17 @@ func (rf *Raft) mkHeartBeat() {
 					reply := AppendEntriesReply{}
 					args := AppendEntriesArgs{Term : term,  From : rf.me}
 					rf.sendAppendEntries(i, &args, &reply)
-					if (!reply.Success) {
+					//if (!reply.Success) {
+					if(rf.term < reply.Term) {
 						rf.mu.Lock()
-						if(rf.state == leader) {
+						//if(rf.state == leader) {
 							//fmt.Println("Leadersgio clear : C", rf.term, "ID: ", rf.me, "  From:", reply.From)
-						}
+						//}
 						rf.state = follower 
-						if(rf.term < reply.Term) {
+						//if(rf.term < reply.Term) {
 							//fmt.Println("Term change (SEND HEARTBEAT) from:",rf.term," to:",reply.Term," in ID:",rf.me)
-							rf.term = reply.Term
-						}
+						rf.term = reply.Term
+						//}
 						
 						rf.mu.Unlock()
 					}
@@ -501,11 +524,15 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.me = me
 
 	rf.term = 0
+	rf.voteFor = nil
 	//rf.termVoted = 0
-	rf.leader = 0
+	rf.leaderID = 0
 	//rf.isLeader = false
 	rf.state = follower
 	rf.recvHeartbeat = false
+
+	rf.tailLogInfo.LastTerm = 0 
+	rf.tailLogInfo.LastIndex = 0
 	// Your initialization code here (2A, 2B, 2C).
 
 	// initialize from state persisted before a crash
