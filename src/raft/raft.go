@@ -59,8 +59,14 @@ const (
 
 
 type LogInfo struct {
-	LastTerm int 
-	LastIndex int
+	Term int 
+	Index int
+}
+
+type Log struct {
+	command interface{}
+	term int 
+	index int
 }
 
 // A Go object implementing a single Raft peer.
@@ -85,7 +91,10 @@ type Raft struct {
 	recvHeartbeat bool
 
 	//2B
+	logs []Log
 	tailLogInfo LogInfo
+	nextIndex []int 
+
 
 }
 
@@ -209,7 +218,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 			}
 	}
 
-	if !(args.TailLogInfo.LastTerm > rf.tailLogInfo.LastTerm || ((args.TailLogInfo.LastTerm == rf.tailLogInfo.LastTerm) && (args.TailLogInfo.LastIndex >= rf.tailLogInfo.LastIndex))) {
+	if !(args.TailLogInfo.Term > rf.tailLogInfo.Term || ((args.TailLogInfo.Term == rf.tailLogInfo.Term) && (args.TailLogInfo.Index >= rf.tailLogInfo.Index))) {
 		reply.VoteGranted = false
 	}  
 	
@@ -222,8 +231,7 @@ type AppendEntriesArgs struct {
 	Term int
 
 	Entries []interface{}
-	PrevLogTerm int 
-	PrevLogIndex int 
+	PrevLog LogInfo
 	LeaderCommit int
 
 	From int
@@ -239,6 +247,9 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	reply.From = rf.me
 	reply.Success = true
 	rf.mu.Lock()
+
+
+	// This part is for heartbeat effect.
 	if(args.Term>=rf.term) {
 		//if(args.Term>rf.term){
 			//fmt.Println("Term change (APPEND) from:",rf.term," to:",args.Term," in ID:",rf.me)
@@ -262,7 +273,12 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		reply.Term = rf.term
 	}
 
-	
+
+	//This part is for append effect.
+	if(args.PrevLog != rf.tailLogInfo) {
+		reply.Success = false
+	}
+
 	rf.mu.Unlock()
 
 }
@@ -483,7 +499,7 @@ func (rf *Raft) mkHeartBeat() {
 				}
 				go func(i int){
 					reply := AppendEntriesReply{}
-					args := AppendEntriesArgs{Term : term,  From : rf.me}
+					args := AppendEntriesArgs{Term : term,  From : rf.me} // Index may be changed in Lab2B
 					rf.sendAppendEntries(i, &args, &reply)
 					//if (!reply.Success) {
 					if(rf.term < reply.Term) {
@@ -531,13 +547,19 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.state = follower
 	rf.recvHeartbeat = false
 
-	rf.tailLogInfo.LastTerm = 0 
-	rf.tailLogInfo.LastIndex = 0
+	rf.tailLogInfo.Term = 0 
+	rf.tailLogInfo.Index = 0
+
+	for _,_ = range peers {
+		rf.nextIndex = append(rf.nextIndex,0)
+	}
+
+	rf.logs = append(rf.logs, Log{term : 0, index : 0})
 	// Your initialization code here (2A, 2B, 2C).
 
 	// initialize from state persisted before a crash
 	rf.readPersist(persister.ReadRaftState())
-
+	
 	// start ticker goroutine to start elections
 	go rf.ticker()
 	go rf.heartBeat()
