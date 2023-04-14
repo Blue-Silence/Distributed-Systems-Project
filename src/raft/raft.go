@@ -268,6 +268,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		
 	} else {
 		reply.Success = false
+		reply.Term = rf.term
 		return 
 	}
 
