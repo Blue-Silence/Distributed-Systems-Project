@@ -329,6 +329,20 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	term := -1
 	isLeader := true
 
+	rf.mu.Lock()
+	if rf.state != leader {
+		isLeader = false 
+	} else {
+		rf.tailLogInfo.Index ++ 
+		rf.tailLogInfo.Term = rf.term
+		rf.logs = append(rf.logs, Log{command, rf.tailLogInfo})
+		term = rf.term
+		index = rf.tailLogInfo.Index
+		rf.copyCount[index] = 1
+		fmt.Println("Adding entry:",Log{command, rf.tailLogInfo},"  on Leader:",rf.me)
+	}
+	
+	rf.mu.Unlock()
 	// Your code here (2B).
 
 
