@@ -272,6 +272,8 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		return 
 	}
 
+	//If the leader is stale,won't got below.
+
 	switch {
 		case args.PrevLog.Index > rf.tailLogInfo.Index :
 			reply.Success = false
@@ -291,6 +293,9 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 						fmt.Println("Warning.Inconsistency between taillog and log[].")
 				}
 				rf.tailLogInfo = v.Info
+				if(v.Info.Index >= args.CommitIndex) {
+					rf.CommitIndex = args.CommitIndex
+				}
 			}
 	}
 
