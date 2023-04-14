@@ -96,6 +96,7 @@ type Raft struct {
 	logs []Log 
 	copyCount map[int]int
 	nextIndex []int
+	applyCh chan ApplyMsg
 }
 
 
@@ -571,6 +572,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.LastApplied = 0
 	rf.logs = []Log{Log{Info : LogInfo{0,0}}}
 	rf.copyCount = make(map[int]int)
+	rf.applyCh = applyCh
 	rf.nextIndex = []int{}
 	for range rf.peers {
 		rf.nextIndex = append(rf.nextIndex, 1)
@@ -583,6 +585,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	go rf.ticker()
 	go rf.heartBeat()
 	go rf.scanCommitable()
+	go rf.finalCommit()
 
 	return rf
 }
@@ -666,3 +669,22 @@ func (rf *Raft) scanCommitable() {
 		time.Sleep(time.Duration(ms) * time.Millisecond)
 	}
 } 
+
+func (rf *Raft) finalCommit() {
+	for {
+		rf.mu.Lock()
+		if (rf.CommitIndex == rf.LastApplied) {
+			rf.mu.Unlock()
+			ms := (500 + (rand.Int63() % 300)) /50
+			time.Sleep(time.Duration(ms) * time.Millisecond)
+		} else {
+			rf.LastApplied ++
+			msg := ApplyMsg{CommandValid : true, Command : rf.logs[rf.LastApplied].Command, CommandIndex : rf.LastApplied}
+			fmt.Println("Apply:",msg, "  on ID:",rf.me)
+			rf.mu.Unlock()
+			rf.applyCh<-msg
+		}
+	}
+	
+
+}
