@@ -94,6 +94,8 @@ type Raft struct {
 	tailLogInfo LogInfo
 	nextIndex []int 
 	leaderCommit int
+	copyCount map[int]int
+	applyCh chan ApplyMsg
 
 
 }
@@ -374,6 +376,7 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 		rf.logs = append(rf.logs, Log{command, rf.tailLogInfo})
 		term = rf.term
 		index = rf.tailLogInfo.Index+1
+		rf.copyCount[index] = 1
 	}
 	rf.mu.Unlock()
 	// Your code here (2B).
@@ -518,7 +521,8 @@ func (rf *Raft) heartBeat() {
 
 		// pause for a random amount of time between 50 and 350
 		// milliseconds.
-		ms := (50 + (rand.Int63() % 300)) 
+		//ms := (50 + (rand.Int63() % 300)) 
+		ms := (50 + (rand.Int63() % 300))
 		time.Sleep(time.Duration(ms) * time.Millisecond)
 	}
 }
@@ -571,15 +575,16 @@ func (rf *Raft) requestForwardEntries(server int) (bool, bool, int) {
 	succeedIndex := 0
 
 	reply := AppendEntriesReply{}
-
+	isHeartbeat := true
 	rf.mu.Lock()
 	currentServerIndex := rf.nextIndex[server]-1
 	n := rf.nextIndex[server]
 	succeedIndex = rf.tailLogInfo.Index;
 	args := AppendEntriesArgs{LeaderId : rf.me, Term : rf.term, PrevLog : rf.logs[currentServerIndex].Info, LeaderCommit : rf.leaderCommit, From : rf.me}
 
-	//args.Entries = Make([]interface{},0)
+	args.Entries = make([]Log, 0)
 	if(currentServerIndex<rf.tailLogInfo.Index) {
+		isHeartbeat = false
 		//args.Entries = append(args.Entries, rf.logs[currentServerIndex+1].Command)
 		args.Entries = append(args.Entries, rf.logs[currentServerIndex+1])
 		succeedIndex = currentServerIndex+1
@@ -609,8 +614,21 @@ func (rf *Raft) requestForwardEntries(server int) (bool, bool, int) {
 			succeedForward = false 
 		default :
 			rf.nextIndex[server] = succeedIndex+1
+			if(!isHeartbeat) {
+				rf.copyCount[succeedIndex] ++
+			}
 	}
-	rf.mu.Unlock()
+
+	num := len(rf.peers)
+	if(rf.copyCount[succeedIndex] > num/2 && rf.leaderCommit < succeedIndex) {
+		msg := ApplyMsg{CommandValid : true, Command : rf.logs[succeedIndex].Command, CommandIndex : succeedIndex}
+		rf.leaderCommit = succeedIndex
+		rf.mu.Unlock()
+		rf.applyCh <- msg
+	} else {
+		rf.mu.Unlock()
+	}
+	
 
 
 	return stillLeader, succeedForward, succeedIndex
@@ -648,6 +666,8 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	for _,_ = range peers {
 		rf.nextIndex = append(rf.nextIndex,1)
 	}
+	rf.copyCount = make(map[int]int)
+	rf.applyCh = applyCh
 
 	rf.logs = append(rf.logs, Log{Info : LogInfo{Term : 0, Index : 0}})
 	// Your initialization code here (2A, 2B, 2C).
@@ -661,3 +681,5 @@ func Make(peers []*labrpc.ClientEnd, me int,
 
 	return rf
 }
+
+//func 
