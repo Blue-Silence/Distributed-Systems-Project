@@ -281,6 +281,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 			return 
 		default :
 			for _,v := range args.Entries {
+				fmt.Println("Append  ",v, " on ID:",rf.me)
 				switch {
 					case v.Info.Index == len(rf.logs) :
 						rf.logs = append(rf.logs, v)
@@ -576,6 +577,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	// start ticker goroutine to start elections
 	go rf.ticker()
 	go rf.heartBeat()
+	go rf.scanCommitable()
 
 	return rf
 }
@@ -635,13 +637,27 @@ func (rf *Raft) requestForwardEntries(server int) (bool, bool, int) {
 	}
 	rf.mu.Unlock()
 
-	/*num := len(rf.peers)
-	_,ok = rf.copyCount[succeedIndex]
-	if(ok && succeedForward && rf.copyCount[succeedIndex] > num/2 && rf.C < succeedIndex) {
-		//msg := ApplyMsg{CommandValid : true, Command : rf.logs[succeedLndex].Command, CommandIndex : succeedIndex}
-		fmt.Println("AA Commit index change from :",rf.C, "  to:",succeedIndex ," on ID:",rf.me)
-		rf.C = succeedIndeL
-	} */
-
 	return stillLeader, succeedForward, succeedIndex
 }
+
+func (rf *Raft) scanCommitableOnce() {
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
+	for i,v := range rf.copyCount {
+		switch {
+			case rf.logs[i].Info.Term != rf.term :
+				delete(rf.copyCount, i)
+			case v > len(rf.peers)/2 && rf.CommitIndex<i:
+				rf.CommitIndex = i 
+			default :
+		}
+	}
+}
+
+func (rf *Raft) scanCommitable() {
+	for {
+		rf.scanCommitableOnce()
+		ms := (500 + (rand.Int63() % 300))
+		time.Sleep(time.Duration(ms) * time.Millisecond)
+	}
+} 
