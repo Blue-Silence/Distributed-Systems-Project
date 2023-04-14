@@ -230,7 +230,8 @@ type AppendEntriesArgs struct {
 	LeaderId int
 	Term int
 
-	Entries []interface{}
+	//Entries []interface{}
+	Entries []Log
 	PrevLog LogInfo
 	LeaderCommit int
 
@@ -280,16 +281,30 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		case args.PrevLog.Index > rf.tailLogInfo.Index :
 			/*fmt.Println("Log not match.")
 			fmt.Println("args:", args.PrevLog)
-			fmt.Println("rf:", rf.tailLogInfo)
-			reply.Success = false*/
+			fmt.Println("rf:", rf.tailLogInfo)*/
+			reply.Success = false
 		case rf.logs[args.PrevLog.Index].Info != args.PrevLog :
 			reply.Success = false
 		default :
-			
+			if len(args.Entries) != 0 {
+				//fmt.Println("Len: ", len(args.Entries))
+				rf.tailLogInfo = args.Entries[len(args.Entries)-1].Info
+				//fmt.Println("Alive")
+				//rf.tailLogInfo = args.Entries[0].Info
+			}
 	}
 
 	if(reply.Success) {
-
+		for _,v := range args.Entries {
+			rf.logs = rf.logs[:cap(rf.logs)]
+			if(v.Info.Index >= cap(rf.logs)) {
+				rf.logs = append(rf.logs, v)
+			} else {
+				fmt.Println("Len", len(rf.logs))
+				fmt.Println("Cap", cap(rf.logs))
+				rf.logs[v.Info.Index] = v
+			}
+		}
 	}
 
 	rf.mu.Unlock()
@@ -358,7 +373,7 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 		rf.tailLogInfo.Term = rf.term
 		rf.logs = append(rf.logs, Log{command, rf.tailLogInfo})
 		term = rf.term
-		index = rf.tailLogInfo.Index
+		index = rf.tailLogInfo.Index+1
 	}
 	rf.mu.Unlock()
 	// Your code here (2B).
@@ -565,7 +580,8 @@ func (rf *Raft) requestForwardEntries(server int) (bool, bool, int) {
 
 	//args.Entries = Make([]interface{},0)
 	if(currentServerIndex<rf.tailLogInfo.Index) {
-		args.Entries = append(args.Entries, rf.logs[currentServerIndex+1].Command)
+		//args.Entries = append(args.Entries, rf.logs[currentServerIndex+1].Command)
+		args.Entries = append(args.Entries, rf.logs[currentServerIndex+1])
 		succeedIndex = currentServerIndex+1
 	}
 
