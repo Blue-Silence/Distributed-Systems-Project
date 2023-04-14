@@ -65,8 +65,7 @@ type LogInfo struct {
 
 type Log struct {
 	command interface{}
-	term int 
-	index int
+	info LogInfo
 }
 
 // A Go object implementing a single Raft peer.
@@ -94,6 +93,7 @@ type Raft struct {
 	logs []Log
 	tailLogInfo LogInfo
 	nextIndex []int 
+	leaderCommit int
 
 
 }
@@ -270,12 +270,17 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		
 	} else {
 		reply.Success = false
+		//fmt.Println("Make a not success. args.term:", args.Term, " rf.term:", rf.term)
 		reply.Term = rf.term
 	}
 
 
 	//This part is for append effect.
 	if(args.PrevLog != rf.tailLogInfo) {
+		/*fmt.Println("Log not match.")
+		fmt.Println("args:", args.PrevLog)
+		fmt.Println("rf:", rf.tailLogInfo)*/
+
 		reply.Success = false
 	}
 
@@ -337,6 +342,17 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	term := -1
 	isLeader := true
 
+	rf.mu.Lock()
+	if rf.state != leader {
+		isLeader = false 
+	} else {
+		rf.tailLogInfo.Index ++ 
+		rf.tailLogInfo.Term = rf.term
+		rf.logs = append(rf.logs, Log{command, rf.tailLogInfo})
+		term = rf.term
+		index = rf.tailLogInfo.Index
+	}
+	rf.mu.Unlock()
 	// Your code here (2B).
 
 
@@ -484,7 +500,7 @@ func (rf *Raft) heartBeat() {
 func (rf *Raft) mkHeartBeat() {
 
 		rf.mu.Lock()
-		term := rf.term
+		//term := rf.term
 		state := rf.state
 		peers := rf.peers
 		me := rf.me
@@ -498,7 +514,7 @@ func (rf *Raft) mkHeartBeat() {
 					continue
 				}
 				go func(i int){
-					reply := AppendEntriesReply{}
+					/*reply := AppendEntriesReply{}
 					args := AppendEntriesArgs{Term : term,  From : rf.me} // Index may be changed in Lab2B
 					rf.sendAppendEntries(i, &args, &reply)
 					//if (!reply.Success) {
@@ -514,12 +530,62 @@ func (rf *Raft) mkHeartBeat() {
 						//}
 						
 						rf.mu.Unlock()
-					}
+					}*/
+					rf.requestForwardEntries(i)
 				}(i)
 
 			}
 
 		}
+}
+
+func (rf *Raft) requestForwardEntries(server int) (bool, bool, int) {
+	stillLeader := true 
+	succeedForward := true 
+	succeedIndex := 0
+
+	reply := AppendEntriesReply{}
+
+	rf.mu.Lock()
+	currentServerIndex := rf.nextIndex[server]-1
+	succeedIndex = rf.tailLogInfo.Index;
+	args := AppendEntriesArgs{LeaderId : rf.me, Term : rf.term, PrevLog : rf.logs[currentServerIndex].info, LeaderCommit : rf.leaderCommit, From : rf.me}
+
+	//args.Entries = Make([]interface{},0)
+	if(currentServerIndex<rf.tailLogInfo.Index) {
+		args.Entries = append(args.Entries, rf.logs[currentServerIndex+1])
+		succeedIndex = currentServerIndex+1
+	}
+
+	term := rf.term
+
+	rf.mu.Unlock()
+
+	ok := rf.sendAppendEntries(server, &args, &reply)
+	
+	rf.mu.Lock()
+	//fmt.Println("Before a not success. Term:",rf.term)
+	switch {
+		case !ok :
+			succeedForward = false 
+		case term < reply.Term :
+			if(rf.term == term ){
+			stillLeader = false 
+			rf.state = follower
+			rf.term = reply.Term
+			}
+			succeedForward = false 
+		case !reply.Success :
+			//fmt.Println("Got a not success. Term:",rf.term)
+			rf.nextIndex[server] --
+			succeedForward = false 
+		default :
+			rf.nextIndex[server] = succeedIndex+1
+	}
+	rf.mu.Unlock()
+
+
+	return stillLeader, succeedForward, succeedIndex
 }
 
 
@@ -549,12 +615,13 @@ func Make(peers []*labrpc.ClientEnd, me int,
 
 	rf.tailLogInfo.Term = 0 
 	rf.tailLogInfo.Index = 0
-
+	rf.leaderCommit = 0
+	rf.nextIndex = []int{}
 	for _,_ = range peers {
-		rf.nextIndex = append(rf.nextIndex,0)
+		rf.nextIndex = append(rf.nextIndex,1)
 	}
 
-	rf.logs = append(rf.logs, Log{term : 0, index : 0})
+	rf.logs = append(rf.logs, Log{info : LogInfo{Term : 0, Index : 0}})
 	// Your initialization code here (2A, 2B, 2C).
 
 	// initialize from state persisted before a crash
