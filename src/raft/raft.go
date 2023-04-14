@@ -26,7 +26,7 @@ import (
 
 	//	"6.5840/labgob"
 	"6.5840/labrpc"
-	//"fmt"
+	"fmt"
 )
 
 
@@ -296,7 +296,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 				}
 				rf.tailLogInfo = v.Info
 			}
-			if(rf.tailLogInfo.Index >= args.CommitIndex) {
+			if(rf.tailLogInfo.Index >= args.CommitIndex && rf.CommitIndex < args.CommitIndex) {
 				rf.CommitIndex = args.CommitIndex
 			}
 
@@ -491,7 +491,7 @@ func (rf *Raft) ticker() {
 				//rf.term = maxTerm
 				rf.state = follower
 				rf.mu.Unlock()
-				ms := (500 + (rand.Int63() % 300))
+				ms := (500 + (rand.Int63() % 300))/10
 				time.Sleep(time.Duration(ms) * time.Millisecond)
 
 			}
@@ -499,7 +499,7 @@ func (rf *Raft) ticker() {
 		} else {
 			// pause for a random amount of time between 50 and 350
 			// milliseconds.
-			ms := (500 + (rand.Int63() % 300))
+			ms := (500 + (rand.Int63() % 300))/10
 			time.Sleep(time.Duration(ms) * time.Millisecond)
 		}
 		
@@ -514,7 +514,7 @@ func (rf *Raft) heartBeat() {
 
 		// pause for a random amount of time between 50 and 350
 		// milliseconds.
-		ms := (50 + (rand.Int63() % 300)) 
+		ms := (50 + (rand.Int63() % 300)) /5
 		time.Sleep(time.Duration(ms) * time.Millisecond)
 	}
 }
@@ -670,27 +670,31 @@ func (rf *Raft) scanCommitableOnce() {
 func (rf *Raft) scanCommitable() {
 	for {
 		rf.scanCommitableOnce()
-		ms := (500 + (rand.Int63() % 300))
+		ms := (500 + (rand.Int63() % 300)) /10
 		time.Sleep(time.Duration(ms) * time.Millisecond)
 	}
 } 
 
 func (rf *Raft) finalCommit() {
+	rf.mu.Lock()
 	for {
-		rf.mu.Lock()
+		
 		////fmt.Println("ON:",rf.me, " CommitIndex:",rf.CommitIndex, " Lastapp:",rf.LastApplied)
 		if (rf.CommitIndex == rf.LastApplied) {
 			rf.mu.Unlock()
-			ms := (500 + (rand.Int63() % 300)) ///50
+			ms := (500 + (rand.Int63() % 300)) /50
 			time.Sleep(time.Duration(ms) * time.Millisecond)
+			rf.mu.Lock()
 		} else {
 			rf.LastApplied ++
+			fmt.Println("ON:",rf.me, " CommitIndex:",rf.CommitIndex, " Lastapp:",rf.LastApplied, "  len:",len(rf.logs))
 			msg := ApplyMsg{CommandValid : true, Command : rf.logs[rf.LastApplied].Command, CommandIndex : rf.LastApplied}
 			//fmt.Println("Apply:",msg, "  on ID:",rf.me)
-			rf.mu.Unlock()
+			
 			rf.applyCh<-msg
 		}
 	}
+	rf.mu.Unlock()
 }
 
 func (rf *Raft) beep() {
