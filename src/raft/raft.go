@@ -93,7 +93,8 @@ type Raft struct {
 	logs []Log
 	tailLogInfo LogInfo
 	nextIndex []int 
-	leaderCommit int
+	CommitIndex int
+	lastApplied int
 	copyCount map[int]int
 	applyCh chan ApplyMsg
 
@@ -235,7 +236,7 @@ type AppendEntriesArgs struct {
 	//Entries []interface{}
 	Entries []Log
 	PrevLog LogInfo
-	LeaderCommit int
+	CommitIndex int
 
 	From int
 }
@@ -298,13 +299,19 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 
 	if(reply.Success) {
 		for _,v := range args.Entries {
-			rf.logs = rf.logs[:cap(rf.logs)]
-			if(v.Info.Index >= cap(rf.logs)) {
+			fmt.Println("Appending entry:",v,"  from Leader:", args.From, " on ID:",rf.me)
+			//rf.logs = rf.logs[:cap(rf.logs)] ///WHY?
+			if(v.Info.Index >= len(rf.logs)) {
 				rf.logs = append(rf.logs, v)
 			} else {
-				fmt.Println("Len", len(rf.logs))
-				fmt.Println("Cap", cap(rf.logs))
+				//fmt.Println("Len", len(rf.logs))
+				//fmt.Println("Cap", cap(rf.logs))
 				rf.logs[v.Info.Index] = v
+			}
+			rf.tailLogInfo = v.Info
+
+			if args.CommitIndex <= rf.tailLogInfo.Index {
+				rf.CommitIndex = args.CommitIndex
 			}
 		}
 	}
@@ -377,12 +384,14 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 		term = rf.term
 		index = rf.tailLogInfo.Index+1
 		rf.copyCount[index] = 1
+		fmt.Println("Adding entry:",Log{command, rf.tailLogInfo},"  on Leader:",rf.me)
 	}
+	
 	rf.mu.Unlock()
 	// Your code here (2B).
 
 
-	return index, term, isLeader
+	return index-1, term, isLeader
 }
 
 // the tester doesn't halt goroutines created by Raft after each test,
@@ -489,6 +498,7 @@ func (rf *Raft) ticker() {
 				rf.state = leader 
 				for i,_ := range rf.nextIndex {
 					rf.nextIndex[i] = rf.tailLogInfo.Index+1
+
 				}
 				fmt.Println("Election succeeded : ", term, "ID: ", rf.me)
 				rf.mu.Unlock()
@@ -580,7 +590,7 @@ func (rf *Raft) requestForwardEntries(server int) (bool, bool, int) {
 	currentServerIndex := rf.nextIndex[server]-1
 	n := rf.nextIndex[server]
 	succeedIndex = rf.tailLogInfo.Index;
-	args := AppendEntriesArgs{LeaderId : rf.me, Term : rf.term, PrevLog : rf.logs[currentServerIndex].Info, LeaderCommit : rf.leaderCommit, From : rf.me}
+	args := AppendEntriesArgs{LeaderId : rf.me, Term : rf.term, PrevLog : rf.logs[currentServerIndex].Info, CommitIndex : rf.CommitIndex, From : rf.me}
 
 	args.Entries = make([]Log, 0)
 	if(currentServerIndex<rf.tailLogInfo.Index) {
@@ -620,11 +630,12 @@ func (rf *Raft) requestForwardEntries(server int) (bool, bool, int) {
 	}
 
 	num := len(rf.peers)
-	if(rf.copyCount[succeedIndex] > num/2 && rf.leaderCommit < succeedIndex) {
-		msg := ApplyMsg{CommandValid : true, Command : rf.logs[succeedIndex].Command, CommandIndex : succeedIndex}
-		rf.leaderCommit = succeedIndex
+	if(rf.copyCount[succeedIndex] > num/2 && rf.CommitIndex < succeedIndex) {
+		//msg := ApplyMsg{CommandValid : true, Command : rf.logs[succeedIndex].Command, CommandIndex : succeedIndex}
+		rf.CommitIndex = succeedIndex
 		rf.mu.Unlock()
-		rf.applyCh <- msg
+		//fmt.Println("Apply entry:",msg,"  from Leader:", rf.me)
+		//rf.applyCh <- msg
 	} else {
 		rf.mu.Unlock()
 	}
@@ -661,15 +672,16 @@ func Make(peers []*labrpc.ClientEnd, me int,
 
 	rf.tailLogInfo.Term = 0 
 	rf.tailLogInfo.Index = 0
-	rf.leaderCommit = 0
+	rf.CommitIndex = 0
 	rf.nextIndex = []int{}
 	for _,_ = range peers {
 		rf.nextIndex = append(rf.nextIndex,1)
 	}
 	rf.copyCount = make(map[int]int)
 	rf.applyCh = applyCh
+	rf.logs = []Log{Log{Info : LogInfo{Term : 0, Index : 0}}}
 
-	rf.logs = append(rf.logs, Log{Info : LogInfo{Term : 0, Index : 0}})
+	//rf.logs = append(rf.logs, Log{Info : LogInfo{Term : 0, Index : 0}})
 	// Your initialization code here (2A, 2B, 2C).
 
 	// initialize from state persisted before a crash
@@ -678,8 +690,27 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	// start ticker goroutine to start elections
 	go rf.ticker()
 	go rf.heartBeat()
-
+	go rf.applyLog()
 	return rf
 }
 
-//func 
+func (rf *Raft) applyLog() {
+
+	for rf.killed() == false {
+
+		rf.mu.Lock()
+		for i:= rf.lastApplied+1;i<=rf.CommitIndex;i++ {
+			msg := ApplyMsg{CommandValid : true, Command : rf.logs[i].Command, CommandIndex : i}
+			rf.applyCh <- msg
+			fmt.Println("Apply entry:",msg,"  on ID:", rf.me)
+			rf.lastApplied = i
+		}
+		rf.mu.Unlock()
+		// pause for a random amount of time between 50 and 350
+		// milliseconds.
+		//ms := (50 + (rand.Int63() % 300)) 
+		ms := (50 + (rand.Int63() % 300))
+		time.Sleep(time.Duration(ms) * time.Millisecond)
+	}
+}
+
