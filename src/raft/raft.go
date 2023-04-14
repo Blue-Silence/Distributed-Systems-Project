@@ -59,8 +59,13 @@ const (
 
 
 type LogInfo struct {
-	LastTerm int 
-	LastIndex int
+	Term int 
+	Index int
+}
+
+type Log struct {
+	Command interface{}
+	Info LogInfo
 }
 
 // A Go object implementing a single Raft peer.
@@ -86,7 +91,11 @@ type Raft struct {
 
 	//2B
 	tailLogInfo LogInfo
-
+	CommitIndex int 
+	LastApplied int
+	logs []Log 
+	copyCount map[int]int
+	nextIndex []int
 }
 
 
@@ -209,7 +218,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 			}
 	}
 
-	if !(args.TailLogInfo.LastTerm > rf.tailLogInfo.LastTerm || ((args.TailLogInfo.LastTerm == rf.tailLogInfo.LastTerm) && (args.TailLogInfo.LastIndex >= rf.tailLogInfo.LastIndex))) {
+	if !(args.TailLogInfo.Term > rf.tailLogInfo.Term || ((args.TailLogInfo.Term == rf.tailLogInfo.Term) && (args.TailLogInfo.Index >= rf.tailLogInfo.Index))) {
 		reply.VoteGranted = false
 	}  
 	
@@ -221,10 +230,9 @@ type AppendEntriesArgs struct {
 	LeaderId int
 	Term int
 
-	Entries []interface{}
-	PrevLogTerm int 
-	PrevLogIndex int 
-	LeaderCommit int
+	Entries []Log
+	PrevLog LogInfo
+	CommitIndex int
 
 	From int
 }
@@ -468,7 +476,7 @@ func (rf *Raft) heartBeat() {
 func (rf *Raft) mkHeartBeat() {
 
 		rf.mu.Lock()
-		term := rf.term
+		//term := rf.term
 		state := rf.state
 		peers := rf.peers
 		me := rf.me
@@ -481,26 +489,7 @@ func (rf *Raft) mkHeartBeat() {
 				if(i == me) {
 					continue
 				}
-				go func(i int){
-					reply := AppendEntriesReply{}
-					args := AppendEntriesArgs{Term : term,  From : rf.me}
-					rf.sendAppendEntries(i, &args, &reply)
-					//if (!reply.Success) {
-					if(rf.term < reply.Term) {
-						rf.mu.Lock()
-						//if(rf.state == leader) {
-							//fmt.Println("Leadersgio clear : C", rf.term, "ID: ", rf.me, "  From:", reply.From)
-						//}
-						rf.state = follower 
-						//if(rf.term < reply.Term) {
-							//fmt.Println("Term change (SEND HEARTBEAT) from:",rf.term," to:",reply.Term," in ID:",rf.me)
-						rf.term = reply.Term
-						//}
-						
-						rf.mu.Unlock()
-					}
-				}(i)
-
+				go rf.requestForwardEntries(i)
 			}
 
 		}
@@ -531,9 +520,18 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.state = follower
 	rf.recvHeartbeat = false
 
-	rf.tailLogInfo.LastTerm = 0 
-	rf.tailLogInfo.LastIndex = 0
+	rf.tailLogInfo.Term = 0 
+	rf.tailLogInfo.Index = 0
 	// Your initialization code here (2A, 2B, 2C).
+
+	rf.CommitIndex = 0
+	rf.LastApplied = 0
+	rf.logs = []Log{Log{Info : LogInfo{0,0}}}
+	rf.copyCount = make(map[int]int)
+	rf.nextIndex = []int{}
+	for range rf.peers {
+		rf.nextIndex = append(rf.nextIndex, 1)
+	}
 
 	// initialize from state persisted before a crash
 	rf.readPersist(persister.ReadRaftState())
@@ -543,4 +541,70 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	go rf.heartBeat()
 
 	return rf
+}
+
+
+func (rf *Raft) requestForwardEntries(server int) (bool, bool, int) {
+	stillLeader := true 
+	succeedForward := true 
+	succeedIndex := 0
+
+	rf.mu.Lock() 
+	//defer rf.mu.Unlock()
+	term := rf.term
+	if(rf.state != leader) {
+		return false, false, -1
+	}
+
+	reply := AppendEntriesReply{}
+	
+	nextIndex := rf.nextIndex[server]
+
+	args := AppendEntriesArgs{LeaderId : rf.me, Term : rf.term, PrevLog : rf.logs[nextIndex-1].Info, CommitIndex : rf.CommitIndex, From : rf.me, Entries : []Log{}}
+	if(nextIndex<=rf.tailLogInfo.Index) {
+		args.Entries = append(args.Entries, rf.logs[nextIndex])
+		succeedIndex = nextIndex
+	} else {
+		succeedIndex = rf.tailLogInfo.Index
+	}
+
+	rf.mu.Unlock()
+	ok := rf.sendAppendEntries(server, &args, &reply)
+	//rf.sendAppendEntries(server, &args, &reply)
+	rf.mu.Lock()
+	switch {
+		case !ok :
+			succeedForward = false 
+		case term != rf.term :
+			rf.mu.Unlock()
+			return false, false, -1
+		case rf.term < reply.Term :
+			stillLeader = false 
+			rf.state = follower
+			fmt.Println("Leader term change on ID:",rf.me, " from:",rf.term , "  to:", reply.Term)
+			rf.term = reply.Term
+			succeedForward = false 
+		case !reply.Success :
+			rf.nextIndex[server]--
+			succeedForward = false 
+		default :
+			rf.nextIndex[server] = succeedIndex+1
+
+			for _,v := range args.Entries {
+				if (v.Info.Term == rf.term) {
+					rf.copyCount[v.Info.Index] ++
+				}
+			}
+	}
+	rf.mu.Unlock()
+
+	/*num := len(rf.peers)
+	_,ok = rf.copyCount[succeedIndex]
+	if(ok && succeedForward && rf.copyCount[succeedIndex] > num/2 && rf.C < succeedIndex) {
+		//msg := ApplyMsg{CommandValid : true, Command : rf.logs[succeedLndex].Command, CommandIndex : succeedIndex}
+		fmt.Println("AA Commit index change from :",rf.C, "  to:",succeedIndex ," on ID:",rf.me)
+		rf.C = succeedIndeL
+	} */
+
+	return stillLeader, succeedForward, succeedIndex
 }
