@@ -64,8 +64,8 @@ type LogInfo struct {
 }
 
 type Log struct {
-	command interface{}
-	info LogInfo
+	Command interface{}
+	Info LogInfo
 }
 
 // A Go object implementing a single Raft peer.
@@ -276,12 +276,20 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 
 
 	//This part is for append effect.
-	if(args.PrevLog != rf.tailLogInfo) {
-		/*fmt.Println("Log not match.")
-		fmt.Println("args:", args.PrevLog)
-		fmt.Println("rf:", rf.tailLogInfo)*/
+	switch {
+		case args.PrevLog.Index > rf.tailLogInfo.Index :
+			/*fmt.Println("Log not match.")
+			fmt.Println("args:", args.PrevLog)
+			fmt.Println("rf:", rf.tailLogInfo)
+			reply.Success = false*/
+		case rf.logs[args.PrevLog.Index].Info != args.PrevLog :
+			reply.Success = false
+		default :
+			
+	}
 
-		reply.Success = false
+	if(reply.Success) {
+
 	}
 
 	rf.mu.Unlock()
@@ -461,6 +469,9 @@ func (rf *Raft) ticker() {
 				rf.voteFor = &rf.me
 				rf.term = term
 				rf.state = leader 
+				for i,_ := range rf.nextIndex {
+					rf.nextIndex[i] = rf.tailLogInfo.Index+1
+				}
 				fmt.Println("Election succeeded : ", term, "ID: ", rf.me)
 				rf.mu.Unlock()
 				//rf.mkHeartBeat()
@@ -548,12 +559,13 @@ func (rf *Raft) requestForwardEntries(server int) (bool, bool, int) {
 
 	rf.mu.Lock()
 	currentServerIndex := rf.nextIndex[server]-1
+	n := rf.nextIndex[server]
 	succeedIndex = rf.tailLogInfo.Index;
-	args := AppendEntriesArgs{LeaderId : rf.me, Term : rf.term, PrevLog : rf.logs[currentServerIndex].info, LeaderCommit : rf.leaderCommit, From : rf.me}
+	args := AppendEntriesArgs{LeaderId : rf.me, Term : rf.term, PrevLog : rf.logs[currentServerIndex].Info, LeaderCommit : rf.leaderCommit, From : rf.me}
 
 	//args.Entries = Make([]interface{},0)
 	if(currentServerIndex<rf.tailLogInfo.Index) {
-		args.Entries = append(args.Entries, rf.logs[currentServerIndex+1])
+		args.Entries = append(args.Entries, rf.logs[currentServerIndex+1].Command)
 		succeedIndex = currentServerIndex+1
 	}
 
@@ -576,8 +588,8 @@ func (rf *Raft) requestForwardEntries(server int) (bool, bool, int) {
 			}
 			succeedForward = false 
 		case !reply.Success :
-			//fmt.Println("Got a not success. Term:",rf.term)
-			rf.nextIndex[server] --
+			//fmt.Println("Got a not success. Term:",rf.term, " current server index:",rf.nextIndex[server], "  a:",a)
+			rf.nextIndex[server] = n-1
 			succeedForward = false 
 		default :
 			rf.nextIndex[server] = succeedIndex+1
@@ -621,7 +633,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 		rf.nextIndex = append(rf.nextIndex,1)
 	}
 
-	rf.logs = append(rf.logs, Log{info : LogInfo{Term : 0, Index : 0}})
+	rf.logs = append(rf.logs, Log{Info : LogInfo{Term : 0, Index : 0}})
 	// Your initialization code here (2A, 2B, 2C).
 
 	// initialize from state persisted before a crash
