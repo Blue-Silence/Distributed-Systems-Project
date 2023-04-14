@@ -247,6 +247,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	reply.From = rf.me
 	reply.Success = true
 	rf.mu.Lock()
+	defer rf.mu.Unlock()
 	if(args.Term>=rf.term) {
 		//if(args.Term>rf.term){
 			//fmt.Println("Term change (APPEND) from:",rf.term," to:",args.Term," in ID:",rf.me)
@@ -254,7 +255,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		
 		if(args.Term > rf.term){
 			rf.voteFor = nil
-			reply.Term = args.Term 
+			rf.term = args.Term
 		}
 		
 		rf.leaderID = args.LeaderId
@@ -267,11 +268,32 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		
 	} else {
 		reply.Success = false
-		reply.Term = rf.term
+		return 
 	}
 
-	
-	rf.mu.Unlock()
+	switch {
+		case args.PrevLog.Index > rf.tailLogInfo.Index :
+			reply.Success = false
+			return 
+		case rf.logs[args.PrevLog.Index].Info != args.PrevLog :
+			reply.Success = false
+			return 
+		default :
+			for _,v := range args.Entries {
+				switch {
+					case v.Info.Index == len(rf.logs) :
+						rf.logs = append(rf.logs, v)
+					case v.Info.Index < len(rf.logs) :
+					rf.logs[v.Info.Index] = v
+					default :
+						fmt.Println("Warning.Inconsistency between taillog and log[].")
+				}
+				rf.tailLogInfo = v.Info
+			}
+	}
+
+
+	reply.Term = rf.term
 
 }
 
