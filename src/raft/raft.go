@@ -111,7 +111,9 @@ func (rf *Raft) GetState() (int, bool) {
 	// Your code here (2A).
 
 	//rf.mkHeartBeat()
-	rf.mu.Lock()
+	//fmt.Println("Before enter lock 1")
+		rf.mu.Lock()
+		//fmt.Println("After enter lock 1")
 	term = rf.term
 	if(rf.state == leader){
 		isleader = true
@@ -196,7 +198,9 @@ type RequestVoteReply struct {
 func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	// Your code here (2A, 2B).
 	////fmt.Println("Enter vote.ID:", rf.me)
-	rf.mu.Lock()
+	//fmt.Println("Before enter lock 2")
+		rf.mu.Lock()
+		//fmt.Println("After enter lock 2")
 	////fmt.Println("Exit vote.ID:", rf.me)
 	reply.Term = args.Term
 	switch {
@@ -250,7 +254,9 @@ type AppendEntriesReply struct {
 func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply) {
 	reply.From = rf.me
 	reply.Success = true
-	rf.mu.Lock()
+	//fmt.Println("Before enter lock 3")
+		rf.mu.Lock()
+		//fmt.Println("After enter lock 3")
 
 
 	// This part is for heartbeat effect.
@@ -286,6 +292,8 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 			fmt.Println("args:", args.PrevLog)
 			fmt.Println("rf:", rf.tailLogInfo)*/
 			reply.Success = false
+		case (len(rf.logs)<args.PrevLog.Index+1):
+			fmt.Println("Warning!")
 		case rf.logs[args.PrevLog.Index].Info != args.PrevLog :
 			reply.Success = false
 		default :
@@ -299,7 +307,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 
 	if(reply.Success) {
 		for _,v := range args.Entries {
-			fmt.Println("Appending entry:",v,"  from Leader:", args.From, " on ID:",rf.me)
+			fmt.Println("Appending entry:",v,"  from Leader:", args.From, " on ID:",rf.me, "  commitIndex:",args.CommitIndex, " on term:", args.Term)
 			//rf.logs = rf.logs[:cap(rf.logs)] ///WHY?
 			if(v.Info.Index >= len(rf.logs)) {
 				rf.logs = append(rf.logs, v)
@@ -309,10 +317,10 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 				rf.logs[v.Info.Index] = v
 			}
 			rf.tailLogInfo = v.Info
-
-			if args.CommitIndex <= rf.tailLogInfo.Index {
-				rf.CommitIndex = args.CommitIndex
-			}
+		}
+		if args.CommitIndex <= rf.tailLogInfo.Index {
+			fmt.Println("BB Commit index change from :",rf.CommitIndex, "  to:",args.CommitIndex ," on ID:",rf.me)
+			rf.CommitIndex = args.CommitIndex
 		}
 	}
 
@@ -374,7 +382,9 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	term := -1
 	isLeader := true
 
-	rf.mu.Lock()
+	//fmt.Println("Before enter lock 4")
+		rf.mu.Lock()
+		//fmt.Println("After enter lock 4")
 	if rf.state != leader {
 		isLeader = false 
 	} else {
@@ -388,6 +398,7 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	}
 	
 	rf.mu.Unlock()
+	//go rf.mkHeartBeat()
 	// Your code here (2B).
 
 
@@ -420,7 +431,9 @@ func (rf *Raft) ticker() {
 		// Check if a leader election should be started.
 		
 		 
+		//fmt.Println("Before enter lock 5")
 		rf.mu.Lock()
+		//fmt.Println("After enter lock 5")
 		f := rf.recvHeartbeat
 		state := rf.state
 		peers := rf.peers
@@ -432,7 +445,9 @@ func (rf *Raft) ticker() {
 		//maxTerm := 0
 
 		if (!f && state == follower) {
-			rf.mu.Lock()
+			//fmt.Println("Before enter lock 6")
+		rf.mu.Lock()
+		//fmt.Println("After enter lock 6")
 			rf.state = candidate
 			rf.term ++
 			//fmt.Println("Timer expired!", "ID: ", rf.me, "  term:", rf.term)
@@ -445,7 +460,9 @@ func (rf *Raft) ticker() {
 			num := 0
 			voted := 1
 			for i,_ := range peers {
+				//fmt.Println("Before enter lock 7")
 				rf.mu.Lock()
+				//fmt.Println("After enter lock 7")
 				state = rf.state
 				rf.mu.Unlock()
 				if(state!=candidate) {
@@ -459,7 +476,9 @@ func (rf *Raft) ticker() {
 					args := RequestVoteArgs{Term : term,  From : rf.me, TailLogInfo : logInfo}
 					reply := RequestVoteReply{}
 					rf.sendRequestVote(i, &args, &reply)
+					//fmt.Println("Before enter lock 8")
 					rf.mu.Lock()
+					//fmt.Println("After enter lock 8")
 					if (reply.VoteGranted) {
 						voted ++
 					} else {
@@ -479,7 +498,9 @@ func (rf *Raft) ticker() {
 			//ms := (100 + (rand.Int63() % 100))
 			ms := 10
 			for i := 0;i<10;i++{
+				//fmt.Println("Before enter lock 9")
 				rf.mu.Lock()
+				//fmt.Println("After enter lock 9")
 				if(voted > num/2 || rf.state != candidate) {
 					rf.mu.Unlock()
 					//fmt.Println("Take ", ms*(i+1), "ms")
@@ -491,7 +512,9 @@ func (rf *Raft) ticker() {
 			}
 			
 
-			rf.mu.Lock()
+			//fmt.Println("Before enter lock 10")
+				rf.mu.Lock()
+				//fmt.Println("After enter lock 10")
 			if (voted > num/2 && rf.state == candidate) {
 				rf.voteFor = &rf.me
 				rf.term = term
@@ -539,11 +562,14 @@ func (rf *Raft) heartBeat() {
 
 func (rf *Raft) mkHeartBeat() {
 
-		rf.mu.Lock()
+	//fmt.Println("Before enter lock 11")
+	rf.mu.Lock()
+	//fmt.Println("After enter lock 11")
 		//term := rf.term
 		state := rf.state
 		peers := rf.peers
 		me := rf.me
+		targetIndex := rf.tailLogInfo.Index 
 		rf.mu.Unlock()
 
 		if (state == leader) {
@@ -571,7 +597,8 @@ func (rf *Raft) mkHeartBeat() {
 						
 						rf.mu.Unlock()
 					}*/
-					rf.requestForwardEntries(i)
+					//rf.requestForwardEntries(i)
+					rf.forwardUntil(i, targetIndex)
 				}(i)
 
 			}
@@ -586,12 +613,14 @@ func (rf *Raft) requestForwardEntries(server int) (bool, bool, int) {
 
 	reply := AppendEntriesReply{}
 	isHeartbeat := true
+	//fmt.Println("Before enter lock 13")
 	rf.mu.Lock()
+		//fmt.Println("After enter lock 13")
 	currentServerIndex := rf.nextIndex[server]-1
 	n := rf.nextIndex[server]
 	succeedIndex = rf.tailLogInfo.Index;
 	args := AppendEntriesArgs{LeaderId : rf.me, Term : rf.term, PrevLog : rf.logs[currentServerIndex].Info, CommitIndex : rf.CommitIndex, From : rf.me}
-
+	state := rf.state
 	args.Entries = make([]Log, 0)
 	if(currentServerIndex<rf.tailLogInfo.Index) {
 		isHeartbeat = false
@@ -604,9 +633,16 @@ func (rf *Raft) requestForwardEntries(server int) (bool, bool, int) {
 
 	rf.mu.Unlock()
 
-	ok := rf.sendAppendEntries(server, &args, &reply)
+	ok := true
+	if(state != leader) {
+		stillLeader = false
+	} else {
+		rf.sendAppendEntries(server, &args, &reply)
+	}
 	
-	rf.mu.Lock()
+	//fmt.Println("Before enter lock 14")
+		rf.mu.Lock()
+		//fmt.Println("After enter lock 14")
 	//fmt.Println("Before a not success. Term:",rf.term)
 	switch {
 		case !ok :
@@ -615,6 +651,7 @@ func (rf *Raft) requestForwardEntries(server int) (bool, bool, int) {
 			if(rf.term == term ){
 			stillLeader = false 
 			rf.state = follower
+			fmt.Println("Leader term change on ID:",rf.me, " from:",rf.term , "  to:", reply.Term)
 			rf.term = reply.Term
 			}
 			succeedForward = false 
@@ -624,14 +661,17 @@ func (rf *Raft) requestForwardEntries(server int) (bool, bool, int) {
 			succeedForward = false 
 		default :
 			rf.nextIndex[server] = succeedIndex+1
-			if(!isHeartbeat) {
+			_,ok := rf.copyCount[succeedIndex]
+			if(!isHeartbeat && ok) {
 				rf.copyCount[succeedIndex] ++
 			}
 	}
 
 	num := len(rf.peers)
-	if(rf.copyCount[succeedIndex] > num/2 && rf.CommitIndex < succeedIndex) {
+	_,ok = rf.copyCount[succeedIndex]
+	if(ok && succeedForward && rf.copyCount[succeedIndex] > num/2 && rf.CommitIndex < succeedIndex) {
 		//msg := ApplyMsg{CommandValid : true, Command : rf.logs[succeedIndex].Command, CommandIndex : succeedIndex}
+		fmt.Println("AA Commit index change from :",rf.CommitIndex, "  to:",succeedIndex ," on ID:",rf.me)
 		rf.CommitIndex = succeedIndex
 		rf.mu.Unlock()
 		//fmt.Println("Apply entry:",msg,"  from Leader:", rf.me)
@@ -698,7 +738,9 @@ func (rf *Raft) applyLog() {
 
 	for rf.killed() == false {
 
+		//fmt.Println("Before enter lock 15")
 		rf.mu.Lock()
+		//fmt.Println("After enter lock 15")
 		for i:= rf.lastApplied+1;i<=rf.CommitIndex;i++ {
 			msg := ApplyMsg{CommandValid : true, Command : rf.logs[i].Command, CommandIndex : i}
 			rf.applyCh <- msg
@@ -714,3 +756,12 @@ func (rf *Raft) applyLog() {
 	}
 }
 
+
+func (rf *Raft) forwardUntil(server int, targetIndex int) {
+	for {
+		stillLeader, _, succeedIndex := rf.requestForwardEntries(server)
+		if (!stillLeader || succeedIndex == targetIndex) {
+			break
+		}
+	}
+}
