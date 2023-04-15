@@ -199,6 +199,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	reply.Term = args.Term
 	switch {
 		case args.Term>rf.term :
+			fmt.Println(" Become follower for A from ",args.From, " on ID:", rf.me, " in term:",args.Term)
 			rf.state = follower
 			rf.voteFor = nil
 			rf.term = args.Term 
@@ -206,6 +207,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 			reply.VoteGranted = true
 			////fmt.Println("Vote for:",args.From, " From ID:", rf.me, " in term:",args.Term)
 		case args.Term == rf.term && rf.voteFor == nil :
+			fmt.Println(" Become follower for B from ",args.From, " on ID:", rf.me, " in term:",args.Term)
 			rf.voteFor = &args.From 
 			reply.VoteGranted = true 
 			////fmt.Println("Vote for:",args.From, " From ID:", rf.me, " in term:",args.Term)
@@ -222,6 +224,10 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	if !(args.TailLogInfo.Term > rf.tailLogInfo.Term || ((args.TailLogInfo.Term == rf.tailLogInfo.Term) && (args.TailLogInfo.Index >= rf.tailLogInfo.Index))) {
 		reply.VoteGranted = false
 	}  
+
+	if (reply.VoteGranted) {
+		rf.recvHeartbeat = true
+	}
 	
 	rf.mu.Unlock()
 	
@@ -245,10 +251,10 @@ type AppendEntriesReply struct {
 }
 
 func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply) {
-	//fmt.Println("(APPEND) term",rf.term," from:",args.Term," in ID:",rf.me)
 	reply.From = rf.me
 	reply.Success = true
 	rf.mu.Lock()
+	//fmt.Println("(APPEND) term",rf.term," from:",args.From," in ID:",rf.me)
 	defer rf.mu.Unlock()
 	if(args.Term>=rf.term) {
 		//if(args.Term>rf.term){
@@ -266,6 +272,9 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 			////fmt.Println("Leadersgio clear : B", rf.term, "ID: ", rf.me , " newTerm:",args.Term, "  From:",args.From)
 		//}
 		rf.term = args.Term
+		if(rf.state == leader){
+			fmt.Println(" Become follower for C from ",reply.From, " on ID:", rf.me, " in term:",args.Term)
+		}
 		rf.state = follower
 		
 	} else {
@@ -285,7 +294,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 			return 
 		default :
 			for _,v := range args.Entries {
-				//fmt.Println("Append  ",v, " on ID:",rf.me)
+				fmt.Println("Append  ",v, " on ID:",rf.me)
 				switch {
 					case v.Info.Index == len(rf.logs) :
 						rf.logs = append(rf.logs, v)
@@ -371,7 +380,7 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 		term = rf.term
 		index = rf.tailLogInfo.Index
 		rf.copyCount[index] = 1
-		//fmt.Println("Adding entry:",Log{command, rf.tailLogInfo},"  on Leader:",rf.me)
+		fmt.Println("Adding entry:",Log{command, rf.tailLogInfo},"  on Leader:",rf.me)
 	}
 	
 	rf.mu.Unlock()
@@ -422,7 +431,7 @@ func (rf *Raft) ticker() {
 			rf.mu.Lock()
 			rf.state = candidate
 			rf.term ++
-			////fmt.Println("Timer expired!", "ID: ", rf.me, "  term:", rf.term)
+			fmt.Println("Timer expired!", "ID: ", rf.me, "  term:", rf.term)
 			term := rf.term
 			rf.voteFor = &rf.me
 			state := rf.state
@@ -453,6 +462,7 @@ func (rf *Raft) ticker() {
 						
 						if(reply.Term>rf.term){
 							rf.state = follower
+							fmt.Println(" Become follower for D  on ID:", rf.me, " in term:",reply.Term)
 							////fmt.Println("Term change (GETVOTE) from:",rf.term," to:",reply.Term," in ID:",rf.me)
 							rf.term = reply.Term
 						}
@@ -483,15 +493,16 @@ func (rf *Raft) ticker() {
 				rf.voteFor = &rf.me
 				rf.term = term
 				rf.state = leader 
-				//fmt.Println("Election succeeded : ", term, "ID: ", rf.me)
+				fmt.Println("Election succeeded : ", term, "ID: ", rf.me)
 				rf.mu.Unlock()
 				//rf.mkHeartBeat()
 			} else {
-				//fmt.Println("Election failed : ", term, "ID: ", rf.me)
+				fmt.Println("Election failed : ", term, "ID: ", rf.me)
 				//rf.term = maxTerm
+				fmt.Println(" Become follower for E ", " on ID:", rf.me)
 				rf.state = follower
 				rf.mu.Unlock()
-				ms := (500 + (rand.Int63() % 300))/10
+				ms := (500 + (rand.Int63() % 300))
 				time.Sleep(time.Duration(ms) * time.Millisecond)
 
 			}
@@ -499,7 +510,7 @@ func (rf *Raft) ticker() {
 		} else {
 			// pause for a random amount of time between 50 and 350
 			// milliseconds.
-			ms := (500 + (rand.Int63() % 300))/10
+			ms := (500 + (rand.Int63() % 300))
 			time.Sleep(time.Duration(ms) * time.Millisecond)
 		}
 		
@@ -514,7 +525,7 @@ func (rf *Raft) heartBeat() {
 
 		// pause for a random amount of time between 50 and 350
 		// milliseconds.
-		ms := (50 + (rand.Int63() % 300)) /5
+		ms := (50 + (rand.Int63() % 300))
 		time.Sleep(time.Duration(ms) * time.Millisecond)
 	}
 }
@@ -633,6 +644,7 @@ func (rf *Raft) requestForwardEntries(server int) (bool, bool, int) {
 		case rf.term < reply.Term :
 			stillLeader = false 
 			rf.state = follower
+			fmt.Println(" Become follower for F from ",reply.From, " on ID:", rf.me, " in term:",reply.Term)
 			//fmt.Println("Leader term change on ID:",rf.me, " from:",rf.term , "  to:", reply.Term)
 			rf.term = reply.Term
 			succeedForward = false 
@@ -670,7 +682,7 @@ func (rf *Raft) scanCommitableOnce() {
 func (rf *Raft) scanCommitable() {
 	for {
 		rf.scanCommitableOnce()
-		ms := (500 + (rand.Int63() % 300)) /10
+		ms := (500 + (rand.Int63() % 300))
 		time.Sleep(time.Duration(ms) * time.Millisecond)
 	}
 } 
@@ -682,14 +694,14 @@ func (rf *Raft) finalCommit() {
 		////fmt.Println("ON:",rf.me, " CommitIndex:",rf.CommitIndex, " Lastapp:",rf.LastApplied)
 		if (rf.CommitIndex == rf.LastApplied) {
 			rf.mu.Unlock()
-			ms := (500 + (rand.Int63() % 300)) /50
+			ms := (500 + (rand.Int63() % 300))
 			time.Sleep(time.Duration(ms) * time.Millisecond)
 			rf.mu.Lock()
 		} else {
 			rf.LastApplied ++
-			fmt.Println("ON:",rf.me, " CommitIndex:",rf.CommitIndex, " Lastapp:",rf.LastApplied, "  len:",len(rf.logs))
 			msg := ApplyMsg{CommandValid : true, Command : rf.logs[rf.LastApplied].Command, CommandIndex : rf.LastApplied}
-			//fmt.Println("Apply:",msg, "  on ID:",rf.me)
+			fmt.Println("Apply:",msg, "ON:",rf.me, " CommitIndex:",rf.CommitIndex, " Lastapp:",rf.LastApplied, "  len:",len(rf.logs))
+			//fmt.Println("  on ID:",rf.me)
 			
 			rf.applyCh<-msg
 		}
@@ -700,8 +712,8 @@ func (rf *Raft) finalCommit() {
 func (rf *Raft) beep() {
 	for {
 		rf.mu.Lock()
-		//fmt.Println("BEEP FROM ID:",rf.me)
-			ms := (500 + (rand.Int63() % 300)) /50
+		fmt.Println("BEEP FROM ID:",rf.me)
+			ms := (500 + (rand.Int63() % 300))
 			time.Sleep(time.Duration(ms) * time.Millisecond)
 			rf.mu.Unlock()
 	}
