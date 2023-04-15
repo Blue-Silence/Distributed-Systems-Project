@@ -70,10 +70,17 @@ type Log struct {
 	Info LogInfo
 }
 
+type Peer struct {
+	e 			*labrpc.ClientEnd
+	mu       	sync.Mutex
+	nextIndex	int
+}
+
 // A Go object implementing a single Raft peer.
 type Raft struct {
 	mu        sync.Mutex          // Lock to protect shared access to this peer's state
-	peers     []*labrpc.ClientEnd // RPC end points of all peers
+	//peers     []*labrpc.ClientEnd // RPC end points of all peers
+	peers     []Peer
 	persister *Persister          // Object to hold this peer's persisted state
 	me        int                 // this peer's index into peers[]
 	dead      int32               // set by Kill()
@@ -97,11 +104,8 @@ type Raft struct {
 	LastApplied int
 	logs []Log 
 	copyCount map[int]int
-	nextIndex []int
 	applyCh chan ApplyMsg
 	logHistory int
-
-	peerLock []sync.Mutex
 
 	forwardCh chan int 
 	countBuffer chan int
@@ -381,12 +385,12 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 // that the caller passes the address of the reply struct with &, not
 // the struct itself.
 func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, reply *RequestVoteReply) bool {
-	ok := rf.peers[server].Call("Raft.RequestVote", args, reply)
+	ok := rf.peers[server].e.Call("Raft.RequestVote", args, reply)
 	return ok
 }
 
 func (rf *Raft) sendAppendEntries(server int,args *AppendEntriesArgs, reply *AppendEntriesReply) bool {
-	ok := rf.peers[server].Call("Raft.AppendEntries", args, reply)
+	ok := rf.peers[server].e.Call("Raft.AppendEntries", args, reply)
 	return ok
 }
 
@@ -535,9 +539,8 @@ func (rf *Raft) ticker() {
 				rf.state = leader 
 				////fmt.Println("Election succeeded : ", term, "ID: ", rf.me, "  tail:",rf.tailLogInfo)
 				rf.copyCount = make(map[int]int)
-				rf.peerLock = make([]sync.Mutex, len(rf.peers))
-				for i,_ := range rf.nextIndex {
-					rf.nextIndex[i] = rf.tailLogInfo.Index + 1 
+				for i,_ := range rf.peers {
+					rf.peers[i] = Peer{nextIndex : rf.tailLogInfo.Index + 1, e : rf.peers[i].e}
 				}
 				rf.mu.Unlock()
 				//rf.mkHeartBeat()
@@ -618,7 +621,7 @@ func (rf *Raft) mkHeartBeat() {
 func Make(peers []*labrpc.ClientEnd, me int,
 	persister *Persister, applyCh chan ApplyMsg) *Raft {
 	rf := &Raft{}
-	rf.peers = peers
+	rf.peers = make([]Peer, len(peers))
 	rf.persister = persister
 	rf.me = me
 
@@ -635,16 +638,15 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	// Your initialization code here (2A, 2B, 2C).
 
 	rf.CommitIndex = 0
-	rf.peerLock = make([]sync.Mutex, len(rf.peers))
 	rf.LastApplied = 0
 	rf.logs = []Log{Log{Info : LogInfo{0,0}}}
 	rf.copyCount = make(map[int]int)
 	rf.applyCh = applyCh
 	rf.forwardCh = make(chan int, 1)
 	rf.countBuffer = make(chan int, bufferSize)
-	rf.nextIndex = []int{}
-	for range rf.peers {
-		rf.nextIndex = append(rf.nextIndex, 1)
+
+	for i,v := range peers {
+		rf.peers[i] = Peer{nextIndex : 1, e : v}
 	}
 
 	// initialize from state persisted before a crash
@@ -667,7 +669,7 @@ func (rf *Raft) requestForwardEntries(server int) (bool, bool, int) {
 	stillLeader := true 
 	succeedForward := true 
 	succeedIndex := 0
-	pL := rf.peerLock[server]
+	pL := rf.peers[server].mu
 	pL.Lock()
 	defer pL.Unlock()
 	
@@ -681,8 +683,8 @@ func (rf *Raft) requestForwardEntries(server int) (bool, bool, int) {
 	
 	
 	reply := AppendEntriesReply{}
-	n := rf.nextIndex[server]
-	nextIndex := rf.nextIndex[server]
+	n := rf.peers[server].nextIndex
+	nextIndex := rf.peers[server].nextIndex
 
 	args := AppendEntriesArgs{LeaderId : rf.me, Term : rf.term, PrevLog : rf.logs[nextIndex-1].Info, CommitIndex : rf.CommitIndex, From : rf.me, Entries : []Log{}}
 	if(nextIndex<=rf.tailLogInfo.Index) {
@@ -714,17 +716,17 @@ func (rf *Raft) requestForwardEntries(server int) (bool, bool, int) {
 			rf.term = reply.Term
 			succeedForward = false 
 		case !reply.Success :
-			if(rf.nextIndex[server] == n) {
+			if(rf.peers[server].nextIndex == n) {
 				if(rf.logs[reply.Conflict.Index].Info.Term == reply.Conflict.Term) {
-					rf.nextIndex[server]--
+					rf.peers[server].nextIndex--
 				} else {
-					rf.nextIndex[server] = reply.Conflict.Index
+					rf.peers[server].nextIndex = reply.Conflict.Index
 				}		
 			}
 			succeedForward = false 
 		default :
-			if(rf.nextIndex[server] == n) {
-				rf.nextIndex[server] = rf.nextIndex[server] + len(args.Entries)
+			if(rf.peers[server].nextIndex == n) {
+				rf.peers[server].nextIndex = rf.peers[server].nextIndex + len(args.Entries)
 				for _,v := range args.Entries {
 					if (v.Info.Term == rf.term) {
 						rf.copyCount[v.Info.Index] ++
@@ -733,7 +735,7 @@ func (rf *Raft) requestForwardEntries(server int) (bool, bool, int) {
 				}
 			}
 	}
-	succeedIndex = rf.nextIndex[server]-1
+	succeedIndex = rf.peers[server].nextIndex-1
 	rf.mu.Unlock()
 	
 	return stillLeader, succeedForward, succeedIndex
