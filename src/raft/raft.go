@@ -512,6 +512,9 @@ func (rf *Raft) ticker() {
 				rf.state = leader 
 				//fmt.Println("Election succeeded : ", term, "ID: ", rf.me, "  tail:",rf.tailLogInfo)
 				rf.copyCount = make(map[int]int)
+				for i,_ := range rf.nextIndex {
+					rf.nextIndex[i] = rf.tailLogInfo.Index + 1 
+				}
 				rf.mu.Unlock()
 				//rf.mkHeartBeat()
 			} else {
