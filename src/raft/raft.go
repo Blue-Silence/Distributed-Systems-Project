@@ -289,11 +289,16 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 
 	//If the leader is stale,won't got below.
 	////fmt.Println("(APPEND) HERE WE ARE! term",rf.term," from:",args.Term," in ID:",rf.me)
-	reply.Conflict.Term = rf.tailLogInfo.Term
+	if(args.PrevLog.Index<=rf.tailLogInfo.Index) {
+		reply.Conflict.Term = rf.logs[args.PrevLog.Index].Info.Term
+	} else {
+		reply.Conflict.Term = rf.tailLogInfo.Term
+	}
 	
 	for _,v := range rf.logs {
 		if v.Info.Term == reply.Conflict.Term {
 			reply.Conflict.Index = v.Info.Index
+			break
 		}
 	}
 	switch {
@@ -628,6 +633,7 @@ func (rf *Raft) requestForwardEntries(server int) (bool, bool, int) {
 	//defer rf.mu.Unlock()
 	term := rf.term
 	if(rf.state != leader) {
+		rf.mu.Unlock()
 		return false, false, -1
 	}
 
