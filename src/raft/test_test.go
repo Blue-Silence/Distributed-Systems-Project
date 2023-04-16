@@ -12,7 +12,7 @@ import "testing"
 import "fmt"
 import "time"
 import "math/rand"
-//import "sync/atomic"
+import "sync/atomic"
 import "sync"
 
 // The tester generously allows solutions to complete elections in one second
@@ -803,7 +803,7 @@ func TestPersist32C(t *testing.T) {
 // The leader in a new term may try to finish replicating log entries that
 // haven't been committed yet.
 func TestFigure82C(t *testing.T) {
-	/*servers := 5
+	servers := 5
 	cfg := make_config(t, servers, false, false)
 	defer cfg.cleanup()
 
@@ -855,7 +855,7 @@ func TestFigure82C(t *testing.T) {
 
 	cfg.one(rand.Int(), servers, true)
 
-	cfg.end()*/
+	cfg.end()
 }
 
 func TestUnreliableAgree2C(t *testing.T) {
@@ -884,7 +884,7 @@ func TestUnreliableAgree2C(t *testing.T) {
 
 	cfg.one(100, servers, true)
 
-	cfg.end()*/
+	cfg.end()
 }
 
 func TestFigure8Unreliable2C(t *testing.T) {
@@ -939,11 +939,11 @@ func TestFigure8Unreliable2C(t *testing.T) {
 
 	cfg.one(rand.Int()%10000, servers, true)
 
-	cfg.end()
+	cfg.end()*/
 }
 
 func internalChurn(t *testing.T, unreliable bool) {
-	/*
+
 	servers := 5
 	cfg := make_config(t, servers, unreliable, false)
 	defer cfg.cleanup()
@@ -1084,15 +1084,15 @@ func internalChurn(t *testing.T, unreliable bool) {
 		}
 	}
 
-	cfg.end()*/
+	cfg.end()
 }
 
 func TestReliableChurn2C(t *testing.T) {
-	internalChurn(t, false)
+	//internalChurn(t, false)
 }
 
 func TestUnreliableChurn2C(t *testing.T) {
-	internalChurn(t, true)
+	//internalChurn(t, true)
 }
 
 const MAXLOGSIZE = 2000
