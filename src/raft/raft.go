@@ -26,7 +26,7 @@ import (
 
 	"6.5840/labgob"
 	"6.5840/labrpc"
-	"fmt"
+	//"fmt"
 )
 
 
@@ -68,6 +68,7 @@ type LogInfo struct {
 type Log struct {
 	Command interface{}
 	Info LogInfo
+	IsNOP bool
 }
 
 type Peer struct {
@@ -110,6 +111,10 @@ type Raft struct {
 
 	forwardCh chan int 
 	countBuffer chan int
+
+	//2C 
+	nopCount int 
+	nopCommitedCount int
 
 	count int64
 }
@@ -475,7 +480,7 @@ func (rf *Raft) sendAppendEntries(server int,args *AppendEntriesArgs, reply *App
 // term. the third return value is true if this server believes it is
 // the leader.
 func (rf *Raft) Start(command interface{}) (int, int, bool) {
-	index := -1
+	/*index := -1
 	term := -1
 	isLeader := true
 
@@ -500,9 +505,49 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	
 	// Your code here (2B).
 
+	return index, term, isLeader*/
+	return rf.insert(command, false, true)
 
-	return index, term, isLeader
 }
+
+func (rf *Raft) insert(command interface{}, IsNOP bool, block bool) (int, int, bool) {
+	index := -1
+	term := -1
+	isLeader := true
+	nC := 0
+	rf.mu.Lock()
+	if rf.state != leader {
+		isLeader = false 
+		rf.mu.Unlock()
+	} else {
+		rf.tailLogInfo.Index ++ 
+		rf.tailLogInfo.Term = rf.term
+		rf.logs = append(rf.logs, Log{})
+		if(!IsNOP) {
+			rf.logs[rf.tailLogInfo.Index] = Log{Command : command, Info : rf.tailLogInfo, IsNOP : false}
+		} else {
+			rf.logs[rf.tailLogInfo.Index] = Log{IsNOP : true, Info : rf.tailLogInfo, Command : command}
+			rf.nopCount ++
+		}
+		nC = rf.nopCount
+		term = rf.term
+		index = rf.tailLogInfo.Index
+		rf.copyCount[index] = 1
+		//fmt.Println("Adding entry:",Log{command, rf.tailLogInfo},"  on Leader:",rf.me, "Tag:",rf.count)
+		rf.persist()
+		rf.mu.Unlock()
+		if(block){
+			rf.countBuffer <- 0
+		}
+	}
+	
+	
+	// Your code here (2B).
+
+	return index - nC, term, isLeader
+}
+
+
 
 // the tester doesn't halt goroutines created by Raft after each test,
 // but it does call the Kill() method. your code can use killed() to
@@ -635,7 +680,8 @@ func (rf *Raft) ticker() {
 				}
 				rf.persist()
 				rf.mu.Unlock()
-				rf.forwardCh <- 0
+				//rf.insert(0, true, false)
+				//rf.forwardCh <- 0
 				ms := (300 + (rand.Int63() % 200))
 				time.Sleep(time.Duration(ms) * time.Millisecond)
 			} else {
@@ -740,6 +786,9 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.applyCh = applyCh
 	rf.forwardCh = make(chan int, 1)
 	rf.countBuffer = make(chan int, bufferSize)
+
+	rf.nopCount = 0
+	rf.nopCommitedCount = 0
 
 	for i,v := range peers {
 		rf.peers[i] = &Peer{nextIndex : 1, e : v}
@@ -902,11 +951,17 @@ func (rf *Raft) finalCommit() {
 			rf.mu.Lock()
 		} else {
 			rf.LastApplied ++
-			msg := ApplyMsg{CommandValid : true, Command : rf.logs[rf.LastApplied].Command, CommandIndex : rf.LastApplied}
+			if(!rf.logs[rf.LastApplied].IsNOP) {
+				msg := ApplyMsg{CommandValid : true, Command : rf.logs[rf.LastApplied].Command, CommandIndex : rf.LastApplied - rf.nopCommitedCount}
+				rf.applyCh<-msg
+			}  else {
+				//msg := ApplyMsg{CommandValid : true, CommandIndex : rf.LastApplied}
+				//rf.applyCh<-msg
+				rf.nopCommitedCount ++
+			}
+			
 			//fmt.Println("Apply:",msg, " on:",rf.me, " CommitIndex:",rf.CommitIndex, " Lastapp:",rf.LastApplied, "  len:",len(rf.logs), "  logHis",rf.logHistory)
 			////////////fmt.Println("  on ID:",rf.me)
-			
-			rf.applyCh<-msg
 		}
 	}
 	//rf.persist()

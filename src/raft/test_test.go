@@ -673,7 +673,7 @@ loop:
 }
 
 func TestPersist12C(t *testing.T) {
-	/*servers := 3
+	servers := 3
 	cfg := make_config(t, servers, false, false)
 	defer cfg.cleanup()
 
@@ -715,11 +715,11 @@ func TestPersist12C(t *testing.T) {
 
 	cfg.one(16, servers, true)
 
-	cfg.end()*/
+	cfg.end()
 }
 
 func TestPersist22C(t *testing.T) {
-	/*servers := 5
+	servers := 5
 	cfg := make_config(t, servers, false, false)
 	defer cfg.cleanup()
 
@@ -761,11 +761,11 @@ func TestPersist22C(t *testing.T) {
 
 	cfg.one(1000, servers, true)
 
-	cfg.end()*/
+	cfg.end()
 }
 
 func TestPersist32C(t *testing.T) {
-	/*servers := 3
+	servers := 3
 	cfg := make_config(t, servers, false, false)
 	defer cfg.cleanup()
 
@@ -791,7 +791,7 @@ func TestPersist32C(t *testing.T) {
 
 	cfg.one(104, servers, true)
 
-	cfg.end()*/
+	cfg.end()
 }
 
 // Test the scenarios described in Figure 8 of the extended Raft paper. Each
@@ -859,7 +859,7 @@ func TestFigure82C(t *testing.T) {
 }
 
 func TestUnreliableAgree2C(t *testing.T) {
-	/*servers := 5
+	servers := 5
 	cfg := make_config(t, servers, true, false)
 	defer cfg.cleanup()
 
@@ -939,7 +939,7 @@ func TestFigure8Unreliable2C(t *testing.T) {
 
 	cfg.one(rand.Int()%10000, servers, true)
 
-	cfg.end()*/
+	cfg.end()
 }
 
 func internalChurn(t *testing.T, unreliable bool) {
@@ -1088,11 +1088,11 @@ func internalChurn(t *testing.T, unreliable bool) {
 }
 
 func TestReliableChurn2C(t *testing.T) {
-	//internalChurn(t, false)
+	internalChurn(t, false)
 }
 
 func TestUnreliableChurn2C(t *testing.T) {
-	//internalChurn(t, true)
+	internalChurn(t, true)
 }
 
 const MAXLOGSIZE = 2000
