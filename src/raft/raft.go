@@ -120,6 +120,7 @@ type Raft struct {
 
 	//2D
 	logOffset int 
+	snapshot []byte
 
 	//count int64
 	//timeout int64
@@ -176,6 +177,7 @@ func (rf *Raft) persist() {
 	e.Encode(rf.tailLogInfo)
 	e.Encode(rf.logHistory)
 	e.Encode(rf.logOffset)
+	e.Encode(rf.snapshot)
 	raftstate := w.Bytes()
 	rf.persister.Save(raftstate, nil)
 }
@@ -194,12 +196,14 @@ func (rf *Raft) readPersist(data []byte) {
 	var tailLogInfo LogInfo
 	var logHistory int
 	var logOffset int
+	var snapshot []byte
 	if d.Decode(&term) != nil ||
 	    d.Decode(&voteFor) != nil || 
 		d.Decode(&logs) != nil ||
 		d.Decode(&tailLogInfo) != nil ||
 		d.Decode(&logHistory) != nil ||
-		d.Decode(&logOffset) != nil {
+		d.Decode(&logOffset) != nil ||
+		d.Decode(&snapshot) != nil {
 			//////fmt.Println("Fatal:recover failon ID:",rf.me)
 			return 
 		} else {
@@ -210,6 +214,7 @@ func (rf *Raft) readPersist(data []byte) {
 			rf.tailLogInfo = tailLogInfo
 			rf.logHistory = logHistory
 			rf.logOffset = logOffset
+			rf.snapshot = snapshot
 			////fmt.Println("Recover succeed. on ID:",rf.me)
 			rf.mu.Unlock()
 		}
@@ -795,6 +800,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	}
 
 	rf.logOffset = 0
+	rf.snapshot = []byte{}
 	rf.mu.Unlock()
 
 	// initialize from state persisted before a crash
