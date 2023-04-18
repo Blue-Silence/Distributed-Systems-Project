@@ -566,16 +566,16 @@ func (rf *Raft) insert(command interface{}, IsNOP bool, block bool) (int, int, b
 			rf.logs[rf.tailLogInfo.Index] = Log{IsNOP : true, Info : rf.tailLogInfo, Command : command}
 			rf.nopCount ++
 		}
-		//nC = rf.nopCount
+		nC = rf.nopCount
 
-		for i,v := range rf.logs {
+		/*for i,v := range rf.logs {
 			if i > rf.tailLogInfo.Index {
 				break
 			}
 			if v.IsNOP {
 				nC++
 			}
-		}
+		}*/
 
 		term = rf.term
 		index = rf.tailLogInfo.Index
@@ -744,7 +744,7 @@ func (rf *Raft) ticker() {
 					rf.peers[i] = &Peer{nextIndex : rf.tailLogInfo.Index + 1, sendSuccess : false}
 				}
 				rf.persist()
-				/*rf.nopCount = 0
+				rf.nopCount = 0
 				for i,v := range rf.logs {
 					if i > rf.tailLogInfo.Index {
 						break
@@ -752,7 +752,7 @@ func (rf *Raft) ticker() {
 					if v.IsNOP {
 						rf.nopCount++
 					}
-				}*/
+				}
 				rf.mu.Unlock()
 				rf.insert(0, true, false)
 				rf.forwardCh <- 0
