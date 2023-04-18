@@ -849,7 +849,7 @@ func (rf *Raft) requestForwardEntries(server int) (bool, bool, int) {
 		ok1 = rf.sendAppendEntries(server, &args, &reply)
 	}()
 	ms := 10
-	for i := 0;i<5 && !ok1;i++{
+	for i := 0;i<10 && !ok1;i++{
 		time.Sleep(time.Duration(ms) * time.Millisecond)
 	}
 	ok := ok1
