@@ -69,6 +69,7 @@ type Log struct {
 	Command interface{}
 	Info LogInfo
 	IsNOP bool
+	OuterIndex int
 }
 
 type Peer struct {
@@ -227,6 +228,21 @@ func (rf *Raft) readPersist(data []byte) {
 // that index. Raft should now trim its log as much as possible.
 func (rf *Raft) Snapshot(index int, snapshot []byte) {
 	// Your code here (2D).
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
+	defer rf.persist()
+
+	logIndex := 0
+	for i,v := range rf.logs {
+		if !v.IsNOP && v.OuterIndex == index {
+			logIndex = i 
+			break
+		}
+	}
+
+	rf.logOffset = rf.logs[logIndex].Info.Index + 1
+	rf.logs = rf.logs[logIndex+1 : ]
+	rf.snapshot = snapshot
 
 }
 
@@ -495,7 +511,7 @@ func (rf *Raft) insert(command interface{}, IsNOP bool, block bool) (int, int, b
 		rf.logs = append(rf.logs, Log{})
 		if(!IsNOP) {
 			//////fmt.Println("Adding entry:",Log{command, rf.tailLogInfo},"  on Leader:",rf.me, "Tag:",rf.count)
-			rf.logs[rf.tailLogInfo.Index- rf.logOffset] = Log{Command : command, Info : rf.tailLogInfo, IsNOP : false}
+			rf.logs[rf.tailLogInfo.Index- rf.logOffset] = Log{Command : command, Info : rf.tailLogInfo, IsNOP : false, OuterIndex : rf.tailLogInfo.Index - rf.nopCount}
 		} else {
 			rf.logs[rf.tailLogInfo.Index- rf.logOffset] = Log{IsNOP : true, Info : rf.tailLogInfo, Command : command}
 			rf.nopCount ++
