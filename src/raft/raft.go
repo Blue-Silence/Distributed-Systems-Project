@@ -117,8 +117,8 @@ type Raft struct {
 	nopCommitedCount int
 	//noNew int
 
-	count int64
-	timeout int64
+	//count int64
+	//timeout int64
 }
 
 
@@ -160,16 +160,6 @@ func (rf *Raft) GetState() (int, bool) {
 // after you've implemented snapshots, pass the current snapshot
 // (or nil if there's not yet a snapshot).
 func (rf *Raft) persist() {
-	// Your code here (2C).
-	// Example:
-	// w := new(bytes.Buffer)
-	// e := labgob.NewEncoder(w)
-	// e.Encode(rf.xxx)
-	// e.Encode(rf.yyy)
-	// raftstate := w.Bytes()
-	// rf.persister.Save(raftstate, nil)
-
-	//rf.mu.Lock()
 	w := new(bytes.Buffer)
 	e := labgob.NewEncoder(w)
 	e.Encode(rf.term)
@@ -183,7 +173,6 @@ func (rf *Raft) persist() {
 	e.Encode(rf.logHistory)
 	raftstate := w.Bytes()
 	rf.persister.Save(raftstate, nil)
-	//rf.mu.Unlock()
 }
 
 
@@ -192,20 +181,6 @@ func (rf *Raft) readPersist(data []byte) {
 	if data == nil || len(data) < 1 { // bootstrap without any state?
 		return
 	}
-	// Your code here (2C).
-	// Example:
-	// r := bytes.NewBuffer(data)
-	// d := labgob.NewDecoder(r)
-	// var xxx
-	// var yyy
-	// if d.Decode(&xxx) != nil ||
-	//    d.Decode(&yyy) != nil {
-	//   error...
-	// } else {
-	//   rf.xxx = xxx
-	//   rf.yyy = yyy
-	// }
-
 	r := bytes.NewBuffer(data)
 	d := labgob.NewDecoder(r)
 	var term int 
@@ -231,11 +206,6 @@ func (rf *Raft) readPersist(data []byte) {
 			////fmt.Println("Recover succeed. on ID:",rf.me)
 			rf.mu.Unlock()
 		}
-	//   error...
-	// } else {
-	//   rf.xxx = xxx
-	//   rf.yyy = yyy
-	// }
 }
 
 
@@ -340,7 +310,7 @@ type AppendEntriesReply struct {
 	Conflict LogInfo
 
 	From int
-	Tag int64
+	//Tag int64
 }
 
 func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply) {
@@ -491,34 +461,6 @@ func (rf *Raft) sendAppendEntries(server int,args *AppendEntriesArgs, reply *App
 // term. the third return value is true if this server believes it is
 // the leader.
 func (rf *Raft) Start(command interface{}) (int, int, bool) {
-	/*index := -1
-	term := -1
-	isLeader := true
-
-	rf.mu.Lock()
-	if rf.state != leader {
-		isLeader = false 
-		rf.mu.Unlock()
-	} else {
-		rf.tailLogInfo.Index ++ 
-		rf.tailLogInfo.Term = rf.term
-		rf.logs = append(rf.logs, Log{})
-		rf.logs[rf.tailLogInfo.Index] = Log{Command : command, Info : rf.tailLogInfo}
-		term = rf.term
-		index = rf.tailLogInfo.Index
-		rf.copyCount[index] = 1
-		//////fmt.Println("Adding entry:",Log{command, rf.tailLogInfo},"  on Leader:",rf.me, "Tag:",rf.count)
-		rf.persist()
-		rf.mu.Unlock()
-		rf.countBuffer <- 0
-	}
-	
-	
-	// Your code here (2B).
-
-	return index, term, isLeader*/
-	//ms := 50
-	//time.Sleep(time.Duration(ms) * time.Millisecond)
 	return rf.insert(command, false, true)
 
 }
@@ -528,26 +470,6 @@ func (rf *Raft) insert(command interface{}, IsNOP bool, block bool) (int, int, b
 	term := -1
 	isLeader := true
 	nC := 0
-
-	/*rf.mu.Lock()
-	if(rf.state == leader) {
-		i := 1
-		for _,p := range rf.peers {
-			if(p.sendSuccess) {
-				i++
-				p.sendSuccess = false
-			}
-		}
-		if(i<=len(rf.peers)/3) {
-
-			if(rf.state == leader){
-				////fmt.Println(" Become follower for D on ID:", rf.me)
-			}
-			//rf.state = follower
-			//////////fmt.Println("Only send out ",i," request on ",rf.me)
-		}
-	}
-	rf.mu.Unlock()*/
 
 	rf.mu.Lock()
 	if rf.state != leader {
@@ -567,15 +489,6 @@ func (rf *Raft) insert(command interface{}, IsNOP bool, block bool) (int, int, b
 			rf.nopCount ++
 		}
 		nC = rf.nopCount
-
-		/*for i,v := range rf.logs {
-			if i > rf.tailLogInfo.Index {
-				break
-			}
-			if v.IsNOP {
-				nC++
-			}
-		}*/
 
 		term = rf.term
 		index = rf.tailLogInfo.Index
@@ -770,10 +683,8 @@ func (rf *Raft) ticker() {
 				rf.mu.Unlock()
 				
 				//ms := (150 + (rand.Int63() % 500))
-
 				//ms := (200 + (rand.Int63() % 500))
 				ms := (200 + (rand.Int63() % 100))
-				//rf.timeout = rf.timeout *2
 				time.Sleep(time.Duration(ms) * time.Millisecond)
 
 			}
@@ -781,7 +692,6 @@ func (rf *Raft) ticker() {
 		} else {
 			// pause for a random amount of time between 50 and 350
 			// milliseconds.
-			rf.timeout = electionTimeOut
 			//ms := (150 + (rand.Int63() % 200))
 			ms := (200 + (rand.Int63() % 200))
 			time.Sleep(time.Duration(ms) * time.Millisecond)
@@ -797,6 +707,7 @@ func (rf *Raft) heartBeat() {
 		for{
 			// pause for a random amount of time between 50 and 350
 			// milliseconds.
+			//ms := (50 + (rand.Int63() % 300)) /5
 			ms := 60 //100 //20 // 50
 			time.Sleep(time.Duration(ms) * time.Millisecond)
 			rf.forwardCh <- 0
@@ -806,21 +717,12 @@ func (rf *Raft) heartBeat() {
 	for rf.killed() == false {
 
 		_ = <- rf.forwardCh
-		//ms := (50 + (rand.Int63() % 300)) /5
-		//time.Sleep(time.Duration(ms) * time.Millisecond)
 		rf.mkHeartBeat()
 	}
 }
 
 func (rf *Raft) mkHeartBeat() {
 		rf.mu.Lock()
-		//rf.noNew ++
-		/*if(rf.noNew>200) {
-			rf.mu.Unlock()
-			rf.insert(0, true, false)
-			rf.mu.Lock()
-		}*/
-		//term := rf.term
 		state := rf.state
 		peers := rf.peers
 		me := rf.me
@@ -833,7 +735,7 @@ func (rf *Raft) mkHeartBeat() {
 					continue
 				}
 				
-				go rf.requestForwardEntries(i, false)
+				go rf.requestForwardEntries(i)
 			}
 
 		}
@@ -880,7 +782,6 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	//rf.noNew = 0
 	rf.nopCount = 0
 	rf.nopCommitedCount = 0
-	rf.timeout = electionTimeOut
 	rf.peersE = peers
 	for i,_ := range peers {
 		rf.peers[i] = &Peer{nextIndex : 1}
@@ -904,7 +805,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 }
 
 
-func (rf *Raft) requestForwardEntries(server int, backing bool) (bool, bool, int) {
+func (rf *Raft) requestForwardEntries(server int) (bool, bool, int) {
 	//fmt.Println("Enter from ",rf.me,"  to ",server)
 	stillLeader := true 
 	succeedForward := true 
@@ -926,24 +827,16 @@ func (rf *Raft) requestForwardEntries(server int, backing bool) (bool, bool, int
 
 	rf.mu.Lock()
 	reply := AppendEntriesReply{}
-	n := pe.nextIndex
 	nextIndex := pe.nextIndex
 
 	args := AppendEntriesArgs{LeaderId : rf.me, Term : rf.term, PrevLog : rf.logs[nextIndex-1].Info, CommitIndex : rf.CommitIndex, From : rf.me, Entries : []Log{}}
 	if(nextIndex<=rf.tailLogInfo.Index) {
-		//for i:=nextIndex;i<=rf.tailLogInfo.Index && i<nextIndex+bufferSize+2;i++ {
-		if(backing) {
-			for i:=nextIndex;i<=rf.tailLogInfo.Index && i<nextIndex+5;i++ {
+		for i:=nextIndex;i<=rf.tailLogInfo.Index ;i++ {
 				args.Entries = append(args.Entries, rf.logs[i])
 			}
-		} else {
-			for i:=nextIndex;i<=rf.tailLogInfo.Index ;i++ {
-				args.Entries = append(args.Entries, rf.logs[i])
-			}
-		}
 	}
-	rf.count ++
-	args.Tag = rf.count
+	//rf.count ++
+	//args.Tag = rf.count
 	state := rf.state
 	//rf.persist()
 	rf.mu.Unlock()
@@ -964,7 +857,7 @@ func (rf *Raft) requestForwardEntries(server int, backing bool) (bool, bool, int
 
 	////fmt.Println("Sending out commitIndex:",args.CommitIndex, " from ID:", rf.me, " Carrying:",args, " nextIndex:", nextIndex, "  rf.tailLogInfo.Index",rf.tailLogInfo.Index)
 	//fmt.Println("Sending out commitIndex:",args.CommitIndex, " from ID:", rf.me, " to:",server , "  nextIndex:", nextIndex, "  rf.tailLogInfo.Index",rf.tailLogInfo.Index)
-	//rf.sendAppendEntries(server, &args, &reply)
+
 	rf.mu.Lock()
 
 	if(ok) {
@@ -981,9 +874,6 @@ func (rf *Raft) requestForwardEntries(server int, backing bool) (bool, bool, int
 			//time.Sleep(time.Duration(ms) * time.Millisecond)
 		case term != rf.term :
 			//////////////fmt.Println("Send fail on BBB  ",rf.me, "  with TAG", args.Tag)
-			//rf.persist()
-			//rf.mu.Unlock()
-			//return false, false, -1
 			succeedForward = false
 		case rf.term < reply.Term :
 			stillLeader = false 
@@ -998,49 +888,30 @@ func (rf *Raft) requestForwardEntries(server int, backing bool) (bool, bool, int
 			succeedForward = false 
 		case !reply.Success :
 			//////////////fmt.Println("Send fail on  CCC ",rf.me, "  with TAG", args.Tag)
-			if(pe.nextIndex == n) {
-				//if(rf.logs[reply.Conflict.Index].Info.Term == reply.Conflict.Term) {
-				//	////fmt.Println("WHAT????")
-				//	pe.nextIndex--
-				//} else {
-					pe.nextIndex = reply.Conflict.Index
-					i :=0
-					for ;i<=rf.tailLogInfo.Index;i++ {
-						if(rf.logs[i].Info.Term>reply.Conflict.Term) {
-							break
-						} 
-					} 
 
-					if(reply.Conflict.Term >= 0 && i < reply.Conflict.Index) {
-						pe.nextIndex = i
-					}
-				//}		
+			pe.nextIndex = reply.Conflict.Index
+			i :=0
+			for ;i<=rf.tailLogInfo.Index;i++ {
+				if(rf.logs[i].Info.Term>reply.Conflict.Term) {
+					break
+				} 
+			} 
+			if(reply.Conflict.Term >= 0 && i < reply.Conflict.Index) {
+				pe.nextIndex = i
 			}
-			//pe.mu.Unlock()
-			//a, b, c := rf.requestForwardEntries(server)
-			//go rf.requestForwardEntries(server, true)
-			/*go  func() {
-				//ms := 10 //(500 + (rand.Int63() % 300)) /20
-				//time.Sleep(time.Duration(ms) * time.Millisecond)
-				rf.requestForwardEntries(server, true)
-			}()*/
+
 
 			rf.mu.Unlock()
 			//go rf.requestForwardEntries(server, true)
 			rf.countBuffer <- 0
 			return stillLeader, succeedForward, succeedIndex
-			//pe.mu.Lock()
-			//return a, b, c
-			//succeedForward = false 
 		default :
 			//////////////fmt.Println("Send succeed on  ",rf.me, "  with TAG", args.Tag)
-			if(pe.nextIndex == n) {
-				pe.nextIndex = pe.nextIndex + len(args.Entries)
-				for _,v := range args.Entries {
-					if (v.Info.Term == rf.term) {
-						rf.copyCount[v.Info.Index] ++
-						////////fmt.Println("Counter++ for ",v, "  on:",rf.me, "  to:",reply.From,"  now counter:",rf.copyCount[v.Info.Index], "  TAG:",args.Tag)
-					}
+			pe.nextIndex = pe.nextIndex + len(args.Entries)
+			for _,v := range args.Entries {
+				if (v.Info.Term == rf.term) {
+					rf.copyCount[v.Info.Index] ++
+					////////fmt.Println("Counter++ for ",v, "  on:",rf.me, "  to:",reply.From,"  now counter:",rf.copyCount[v.Info.Index], "  TAG:",args.Tag)
 				}
 			}
 	}
