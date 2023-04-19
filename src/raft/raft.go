@@ -872,6 +872,12 @@ func (rf *Raft) requestForwardEntries(server int) (bool, bool, int) {
 	reply := AppendEntriesReply{}
 	nextIndex := pe.nextIndex
 
+	if (nextIndex <= rf.snapshotTail.Index ) {
+		rf.mu.Unlock()
+		//then do something to send snapshot TO BE DONE
+		return stillLeader, succeedForward, succeedIndex
+	}
+
 	//HARD problem. If nextIndex <= rf.snapshotTail.Index,should not go bellow. Impl later.
 	args := AppendEntriesArgs{LeaderId : rf.me, Term : rf.term, CommitIndex : rf.CommitIndex, From : rf.me, Entries : []Log{}}
 	switch {
