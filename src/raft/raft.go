@@ -804,10 +804,15 @@ func (rf *Raft) requestForwardEntries(server int) (bool, bool, int) {
 	defer pe.mu.Unlock()
 
 	rf.mu.Lock()
-	//////////fmt.Println("On: ",rf.me, "  PASS A")
+
+	if(term != rf.term) {
+		rf.mu.Unlock()
+		return false, false, -1
+	}
+	
 	reply := AppendEntriesReply{}
 	nextIndex := pe.nextIndex
-	
+
 	args := AppendEntriesArgs{LeaderId : rf.me, Term : rf.term, CommitIndex : rf.CommitIndex, From : rf.me, Entries : []Log{}, IsSnapshot : false, }
 	switch {
 		case nextIndex-1 == rf.snapshotTail.Index :
