@@ -114,8 +114,8 @@ type Raft struct {
 	countBuffer chan int
 
 	//2C 
-	nopCount int 
-	nopCommitedCount int
+	//nopCount int 
+	//nopCommitedCount int
 	//noNew int
 
 
@@ -555,7 +555,7 @@ func (rf *Raft) insert(command interface{}, IsNOP bool, block bool) (int, int, b
 			rf.logs[rf.tailLogInfo.Index- (rf.snapshotTail.Index+1)] = Log{Command : command, Info : rf.tailLogInfo, IsNOP : false}
 		} else {
 			rf.logs[rf.tailLogInfo.Index- (rf.snapshotTail.Index+1)] = Log{IsNOP : true, Info : rf.tailLogInfo, Command : command}
-			rf.nopCount ++
+			//rf.nopCount ++
 		}
 		//nC = rf.nopCount
 
@@ -735,7 +735,7 @@ func (rf *Raft) ticker() {
 					rf.peers[i] = &Peer{nextIndex : rf.tailLogInfo.Index + 1, sendSuccess : false}
 				}
 				rf.persist()
-				rf.nopCount = rf.snapshotTail.Index - rf.snapshotTail.OuterIndex // HERE WE WILL HAVE PROBLEM
+				/*rf.nopCount = rf.snapshotTail.Index - rf.snapshotTail.OuterIndex // HERE WE WILL HAVE PROBLEM
 				for _,v := range rf.logs {
 					if v.Info.Index > rf.tailLogInfo.Index {
 						break
@@ -743,7 +743,7 @@ func (rf *Raft) ticker() {
 					if v.IsNOP {
 						rf.nopCount++
 					}
-				}
+				}*/
 				rf.mu.Unlock()
 				rf.insert(0, true, false)
 				rf.forwardCh <- 0
@@ -858,8 +858,8 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.countBuffer = make(chan int, bufferSize*10)
 
 	//rf.noNew = 0
-	rf.nopCount = 0
-	rf.nopCommitedCount = 0
+	//rf.nopCount = 0
+	//rf.nopCommitedCount = 0
 	rf.peersE = peers
 	for i,_ := range peers {
 		rf.peers[i] = &Peer{nextIndex : 1}
@@ -1085,7 +1085,7 @@ func (rf *Raft) finalCommit() {
 				}  else {
 					msg = ApplyMsg{CommandValid : true, CommandIndex : rf.LastApplied}
 					//rf.applyCh<-msg
-					rf.nopCommitedCount ++
+					//rf.nopCommitedCount ++
 				}
 		}
 			////fmt.Println("Apply:",msg, " on:",rf.me, " CommitIndex:",rf.CommitIndex, " Lastapp:",rf.LastApplied, "  len:",len(rf.logs), "  logHis",rf.logHistory)
