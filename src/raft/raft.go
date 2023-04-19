@@ -334,6 +334,10 @@ type AppendEntriesArgs struct {
 	PrevLog LogInfo
 	CommitIndex int
 
+	IsSnapshot bool 
+	Snapshot []byte 
+	SnapshotTail LogInfo
+
 	From int
 	Tag int64
 }
@@ -384,6 +388,29 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 
 	//If the leader is stale,won't got below.
 	////////////////fmt.Println("(APPEND) HERE WE ARE! term",rf.term," from:",args.Term," in ID:",rf.me)
+	if(args.IsSnapshot) {
+		if(args.SnapshotTail.Index > rf.snapshotTail.Index) {
+			rf.snapshotTail = args.SnapshotTail
+			rf.snapshot = args.Snapshot
+			in := -1
+			for i,v := range rf.logs {
+				if(i+rf.snapshotTail.Index+1 > rf.tailLogInfo.Index) {
+					break
+				}
+				if(v.Info.Index == rf.snapshotTail.Index) {
+					in = i 
+					break
+				}
+			}
+			rf.logs = rf.logs[in+1 : ]
+			if(rf.CommitIndex < args.SnapshotTail.Index) {
+				rf.CommitIndex = args.SnapshotTail.Index
+			}
+			//rf.logs = rf.logs[rf.snapshotTail.Index]
+		}
+		return 
+	}
+
 	if(args.PrevLog.Index<=rf.tailLogInfo.Index && args.PrevLog.Index>=(rf.snapshotTail.Index+1)) {
 		reply.Conflict.Term = rf.logs[args.PrevLog.Index- (rf.snapshotTail.Index+1)].Info.Term
 		for _,v := range rf.logs {
@@ -872,19 +899,25 @@ func (rf *Raft) requestForwardEntries(server int) (bool, bool, int) {
 	reply := AppendEntriesReply{}
 	nextIndex := pe.nextIndex
 
-	if (nextIndex <= rf.snapshotTail.Index ) {
+	/*if (nextIndex <= rf.snapshotTail.Index ) {
 		rf.mu.Unlock()
 		//then do something to send snapshot TO BE DONE
 		return stillLeader, succeedForward, succeedIndex
-	}
+	}*/
 
-	//HARD problem. If nextIndex <= rf.snapshotTail.Index,should not go bellow. Impl later.
-	args := AppendEntriesArgs{LeaderId : rf.me, Term : rf.term, CommitIndex : rf.CommitIndex, From : rf.me, Entries : []Log{}}
+	
+	args := AppendEntriesArgs{LeaderId : rf.me, Term : rf.term, CommitIndex : rf.CommitIndex, From : rf.me, Entries : []Log{}, IsSnapshot : false, }
 	switch {
 		case nextIndex-1 == rf.snapshotTail.Index :
 			args.PrevLog = rf.snapshotTail 
 		case nextIndex-1 > rf.snapshotTail.Index :
 			args.PrevLog = rf.logs[nextIndex-1 - (rf.snapshotTail.Index+1)].Info
+		case nextIndex <= rf.snapshotTail.Index :
+			//HARD problem. If nextIndex <= rf.snapshotTail.Index. Impl later.
+			args.IsSnapshot = true 
+			args.Snapshot = rf.snapshot 
+			args.SnapshotTail = rf.snapshotTail
+			//then do something to send snapshot TO BE DONE
 		default :
 			//fmt.Println("Warning.")
 	}
@@ -965,11 +998,17 @@ func (rf *Raft) requestForwardEntries(server int) (bool, bool, int) {
 			return stillLeader, succeedForward, succeedIndex
 		default :
 			//////////////fmt.Println("Send succeed on  ",rf.me, "  with TAG", args.Tag)
-			pe.nextIndex = pe.nextIndex + len(args.Entries)
-			for _,v := range args.Entries {
-				if (v.Info.Term == rf.term) {
-					rf.copyCount[v.Info.Index] ++
-					////////fmt.Println("Counter++ for ",v, "  on:",rf.me, "  to:",reply.From,"  now counter:",rf.copyCount[v.Info.Index], "  TAG:",args.Tag)
+			if args.IsSnapshot {
+				if(pe.nextIndex < rf.snapshotTail.Index + 1) {
+					pe.nextIndex = rf.snapshotTail.Index + 1
+				}
+			} else {
+				pe.nextIndex = pe.nextIndex + len(args.Entries)
+				for _,v := range args.Entries {
+					if (v.Info.Term == rf.term) {
+						rf.copyCount[v.Info.Index] ++
+						////////fmt.Println("Counter++ for ",v, "  on:",rf.me, "  to:",reply.From,"  now counter:",rf.copyCount[v.Info.Index], "  TAG:",args.Tag)
+					}
 				}
 			}
 	}
@@ -1011,29 +1050,35 @@ func (rf *Raft) finalCommit() {
 	for rf.killed() == false {
 		
 		////////////////fmt.Println("ON:",rf.me, " CommitIndex:",rf.CommitIndex, " Lastapp:",rf.LastApplied)
-		if (rf.CommitIndex == rf.LastApplied) {
+		var msg ApplyMsg
+		switch {
+			case rf.CommitIndex == rf.LastApplied :
 			//rf.persist()
-			rf.mu.Unlock()
-			
-			//ms := 10//20 //(500 + (rand.Int63() % 300)) /20
-			ms := 5
-			time.Sleep(time.Duration(ms) * time.Millisecond)
-			rf.mu.Lock()
-		} else {
-			var msg ApplyMsg
-			rf.LastApplied ++
-			if(!rf.logs[rf.LastApplied - (rf.snapshotTail.Index+1)].IsNOP) {
-				msg = ApplyMsg{CommandValid : true, Command : rf.logs[rf.LastApplied - (rf.snapshotTail.Index+1)].Command, CommandIndex : rf.LastApplied - rf.nopCommitedCount}
+				rf.mu.Unlock()
+				
+				//ms := 10//20 //(500 + (rand.Int63() % 300)) /20
+				ms := 5
+				time.Sleep(time.Duration(ms) * time.Millisecond)
+				rf.mu.Lock()
+			case rf.snapshotTail.Index > rf.LastApplied :
+				//abababababa TO BE DONE
+				msg = ApplyMsg{CommandValid : false, SnapshotValid : true, Snapshot : rf.snapshot, SnapshotIndex : rf.snapshotTail.OuterIndex, SnapshotTerm : rf.snapshotTail.Term }
 				rf.applyCh<-msg
-			}  else {
-				msg = ApplyMsg{CommandValid : true, CommandIndex : rf.LastApplied}
-				//rf.applyCh<-msg
-				rf.nopCommitedCount ++
-			}
-			
+			default : 
+				rf.LastApplied ++
+				l := rf.logs[rf.LastApplied - (rf.snapshotTail.Index+1)]
+				if(!rf.logs[rf.LastApplied - (rf.snapshotTail.Index+1)].IsNOP) {
+					msg = ApplyMsg{CommandValid : true, Command : l.Command, CommandIndex : l.Info.OuterIndex}
+					rf.applyCh<-msg
+				}  else {
+					msg = ApplyMsg{CommandValid : true, CommandIndex : rf.LastApplied}
+					//rf.applyCh<-msg
+					rf.nopCommitedCount ++
+				}
+		}
 			//fmt.Println("Apply:",msg, " on:",rf.me, " CommitIndex:",rf.CommitIndex, " Lastapp:",rf.LastApplied, "  len:",len(rf.logs), "  logHis",rf.logHistory)
 			////////////////fmt.Println("  on ID:",rf.me)
-		}
+		
 	}
 	//rf.persist()
 	rf.mu.Unlock()
