@@ -63,13 +63,13 @@ const electionTimeOut int64 = 200
 type LogInfo struct {
 	Term int 
 	Index int
+	OuterIndex int
 }
 
 type Log struct {
 	Command interface{}
 	Info LogInfo
 	IsNOP bool
-	OuterIndex int
 }
 
 type Peer struct {
@@ -122,6 +122,7 @@ type Raft struct {
 	//2D
 	logOffset int 
 	snapshot []byte
+	snapshotTail LogInfo 
 
 	//count int64
 	//timeout int64
@@ -177,8 +178,9 @@ func (rf *Raft) persist() {
 	e.Encode(rf.logs)
 	e.Encode(rf.tailLogInfo)
 	e.Encode(rf.logHistory)
-	e.Encode(rf.logOffset)
+	e.Encode((rf.snapshotTail.Index+1))
 	e.Encode(rf.snapshot)
+	e.Encode(rf.snapshotTail)
 	raftstate := w.Bytes()
 	rf.persister.Save(raftstate, nil)
 }
@@ -198,13 +200,16 @@ func (rf *Raft) readPersist(data []byte) {
 	var logHistory int
 	var logOffset int
 	var snapshot []byte
+	var snapshotTail LogInfo 
+
 	if d.Decode(&term) != nil ||
 	    d.Decode(&voteFor) != nil || 
 		d.Decode(&logs) != nil ||
 		d.Decode(&tailLogInfo) != nil ||
 		d.Decode(&logHistory) != nil ||
 		d.Decode(&logOffset) != nil ||
-		d.Decode(&snapshot) != nil {
+		d.Decode(&snapshot) != nil ||
+		d.Decode(&snapshotTail) != nil {
 			//////fmt.Println("Fatal:recover failon ID:",rf.me)
 			return 
 		} else {
@@ -214,8 +219,9 @@ func (rf *Raft) readPersist(data []byte) {
 			rf.logs = logs
 			rf.tailLogInfo = tailLogInfo
 			rf.logHistory = logHistory
-			rf.logOffset = logOffset
+			(rf.logOffset) = logOffset
 			rf.snapshot = snapshot
+			rf.snapshotTail = snapshotTail
 			////fmt.Println("Recover succeed. on ID:",rf.me)
 			rf.mu.Unlock()
 		}
@@ -234,13 +240,14 @@ func (rf *Raft) Snapshot(index int, snapshot []byte) {
 
 	logIndex := 0
 	for i,v := range rf.logs {
-		if !v.IsNOP && v.OuterIndex == index {
+		if !v.IsNOP && v.Info.OuterIndex == index {
 			logIndex = i 
 			break
 		}
 	}
 
-	rf.logOffset = rf.logs[logIndex].Info.Index + 1
+	(rf.logOffset) = rf.logs[logIndex].Info.Index + 1
+	rf.snapshotTail = rf.logs[logIndex].Info
 	rf.logs = rf.logs[logIndex+1 : ]
 	rf.snapshot = snapshot
 
@@ -377,8 +384,8 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 
 	//If the leader is stale,won't got below.
 	////////////////fmt.Println("(APPEND) HERE WE ARE! term",rf.term," from:",args.Term," in ID:",rf.me)
-	if(args.PrevLog.Index<=rf.tailLogInfo.Index) {
-		reply.Conflict.Term = rf.logs[args.PrevLog.Index- rf.logOffset].Info.Term
+	if(args.PrevLog.Index<=rf.tailLogInfo.Index && args.PrevLog.Index>=(rf.snapshotTail.Index+1)) {
+		reply.Conflict.Term = rf.logs[args.PrevLog.Index- (rf.snapshotTail.Index+1)].Info.Term
 		for _,v := range rf.logs {
 			if v.Info.Term == reply.Conflict.Term {
 				reply.Conflict.Index = v.Info.Index
@@ -394,7 +401,10 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		case args.PrevLog.Index > rf.tailLogInfo.Index :
 			reply.Success = false
 			return 
-		case rf.logs[args.PrevLog.Index - rf.logOffset].Info != args.PrevLog :
+		case args.PrevLog.Index < (rf.snapshotTail.Index+1) - 1 :
+			reply.Success = true 
+			return // Stale append
+		case  args.PrevLog.Index != (rf.snapshotTail.Index+1) - 1 && rf.logs[args.PrevLog.Index - (rf.snapshotTail.Index+1)].Info != args.PrevLog :
 			reply.Success = false
 			return 
 		default :
@@ -408,7 +418,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 					case v.Info.Index == len(rf.logs) :
 						rf.logs = append(rf.logs, v)
 					case v.Info.Index < len(rf.logs) :
-						rf.logs[v.Info.Index- rf.logOffset] = v
+						rf.logs[v.Info.Index- (rf.snapshotTail.Index+1)] = v
 					default :
 						//////////////fmt.Println("Warning.Inconsistency between taillog and log[].")
 				}
@@ -508,12 +518,13 @@ func (rf *Raft) insert(command interface{}, IsNOP bool, block bool) (int, int, b
 		//rf.noNew = 0
 		rf.tailLogInfo.Index ++ 
 		rf.tailLogInfo.Term = rf.term
+		rf.tailLogInfo.OuterIndex  = rf.tailLogInfo.Index - rf.nopCount
 		rf.logs = append(rf.logs, Log{})
 		if(!IsNOP) {
 			//////fmt.Println("Adding entry:",Log{command, rf.tailLogInfo},"  on Leader:",rf.me, "Tag:",rf.count)
-			rf.logs[rf.tailLogInfo.Index- rf.logOffset] = Log{Command : command, Info : rf.tailLogInfo, IsNOP : false, OuterIndex : rf.tailLogInfo.Index - rf.nopCount}
+			rf.logs[rf.tailLogInfo.Index- (rf.snapshotTail.Index+1)] = Log{Command : command, Info : rf.tailLogInfo, IsNOP : false}
 		} else {
-			rf.logs[rf.tailLogInfo.Index- rf.logOffset] = Log{IsNOP : true, Info : rf.tailLogInfo, Command : command}
+			rf.logs[rf.tailLogInfo.Index- (rf.snapshotTail.Index+1)] = Log{IsNOP : true, Info : rf.tailLogInfo, Command : command}
 			rf.nopCount ++
 		}
 		nC = rf.nopCount
@@ -685,9 +696,9 @@ func (rf *Raft) ticker() {
 					rf.peers[i] = &Peer{nextIndex : rf.tailLogInfo.Index + 1, sendSuccess : false}
 				}
 				rf.persist()
-				rf.nopCount = 0
-				for i,v := range rf.logs {
-					if i > rf.tailLogInfo.Index {
+				rf.nopCount = rf.snapshotTail.Index - rf.snapshotTail.OuterIndex // HERE WE WILL HAVE PROBLEM
+				for _,v := range rf.logs {
+					if v.Info.Index > rf.tailLogInfo.Index {
 						break
 					}
 					if v.IsNOP {
@@ -801,7 +812,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 
 	rf.CommitIndex = 0
 	rf.LastApplied = 0
-	rf.logs = []Log{Log{Info : LogInfo{0,0}}}
+	rf.logs = []Log{Log{Info : LogInfo{0,0,0}}}
 	rf.copyCount = make(map[int]int)
 	rf.applyCh = applyCh
 	rf.forwardCh = make(chan int, 4096)
@@ -815,8 +826,9 @@ func Make(peers []*labrpc.ClientEnd, me int,
 		rf.peers[i] = &Peer{nextIndex : 1}
 	}
 
-	rf.logOffset = 0
+	(rf.logOffset) = 0
 	rf.snapshot = []byte{}
+	rf.snapshotTail = LogInfo{-1,-1,-1}
 	rf.mu.Unlock()
 
 	// initialize from state persisted before a crash
@@ -860,10 +872,19 @@ func (rf *Raft) requestForwardEntries(server int) (bool, bool, int) {
 	reply := AppendEntriesReply{}
 	nextIndex := pe.nextIndex
 
-	args := AppendEntriesArgs{LeaderId : rf.me, Term : rf.term, PrevLog : rf.logs[nextIndex-1- rf.logOffset].Info, CommitIndex : rf.CommitIndex, From : rf.me, Entries : []Log{}}
+	//HARD problem. If nextIndex <= rf.snapshotTail.Index,should not go bellow. Impl later.
+	args := AppendEntriesArgs{LeaderId : rf.me, Term : rf.term, CommitIndex : rf.CommitIndex, From : rf.me, Entries : []Log{}}
+	switch {
+		case nextIndex-1 == rf.snapshotTail.Index :
+			args.PrevLog = rf.snapshotTail 
+		case nextIndex-1 > rf.snapshotTail.Index :
+			args.PrevLog = rf.logs[nextIndex-1 - (rf.snapshotTail.Index+1)].Info
+		default :
+			//fmt.Println("Warning.")
+	}
 	if(nextIndex<=rf.tailLogInfo.Index) {
 		for i:=nextIndex;i<=rf.tailLogInfo.Index ;i++ {
-				args.Entries = append(args.Entries, rf.logs[i - rf.logOffset])
+				args.Entries = append(args.Entries, rf.logs[i - (rf.snapshotTail.Index+1)])
 			}
 	}
 	//rf.count ++
@@ -921,9 +942,9 @@ func (rf *Raft) requestForwardEntries(server int) (bool, bool, int) {
 			//////////////fmt.Println("Send fail on  CCC ",rf.me, "  with TAG", args.Tag)
 
 			pe.nextIndex = reply.Conflict.Index
-			i :=0
+			i := (rf.snapshotTail.Index+1)
 			for ;i<=rf.tailLogInfo.Index;i++ {
-				if(rf.logs[i - rf.logOffset].Info.Term>reply.Conflict.Term) {
+				if(rf.logs[i - (rf.snapshotTail.Index+1)].Info.Term>reply.Conflict.Term) {
 					break
 				} 
 			} 
@@ -962,7 +983,7 @@ func (rf *Raft) scanCommitableOnce() {
 	//defer rf.persist()
 	for i,v := range rf.copyCount {
 		switch {
-			case rf.logs[i - rf.logOffset].Info.Term != rf.term :
+			case i - (rf.snapshotTail.Index+1) < 0 || rf.logs[i - (rf.snapshotTail.Index+1)].Info.Term != rf.term :
 				//delete(rf.copyCount, i)
 			case v > len(rf.peers)/2 && rf.CommitIndex<i:
 				rf.CommitIndex = i 
@@ -995,8 +1016,8 @@ func (rf *Raft) finalCommit() {
 		} else {
 			var msg ApplyMsg
 			rf.LastApplied ++
-			if(!rf.logs[rf.LastApplied - rf.logOffset].IsNOP) {
-				msg = ApplyMsg{CommandValid : true, Command : rf.logs[rf.LastApplied - rf.logOffset].Command, CommandIndex : rf.LastApplied - rf.nopCommitedCount}
+			if(!rf.logs[rf.LastApplied - (rf.snapshotTail.Index+1)].IsNOP) {
+				msg = ApplyMsg{CommandValid : true, Command : rf.logs[rf.LastApplied - (rf.snapshotTail.Index+1)].Command, CommandIndex : rf.LastApplied - rf.nopCommitedCount}
 				rf.applyCh<-msg
 			}  else {
 				msg = ApplyMsg{CommandValid : true, CommandIndex : rf.LastApplied}
