@@ -1,12 +1,15 @@
 package kvraft
 
 import (
-	"6.5840/labgob"
-	"6.5840/labrpc"
-	"6.5840/raft"
+	"fmt"
 	"log"
 	"sync"
 	"sync/atomic"
+	"time"
+
+	"6.5840/labgob"
+	"6.5840/labrpc"
+	"6.5840/raft"
 )
 
 const Debug = false
@@ -18,11 +21,23 @@ func DPrintf(format string, a ...interface{}) (n int, err error) {
 	return
 }
 
+const (
+	PutF    = 1
+	GetF    = 2
+	AppendF = 3
+)
 
 type Op struct {
 	// Your definitions here.
 	// Field names must start with capital letters,
 	// otherwise RPC will break.
+	Type  int
+	Key   string
+	Value string
+
+	Id RpcId
+
+	Server int
 }
 
 type KVServer struct {
@@ -35,15 +50,116 @@ type KVServer struct {
 	maxraftstate int // snapshot if log grows this big
 
 	// Your definitions here.
+	callbackLt CallBackList
+	KvS        KvStorage
+	AppliedRPC map[int64]int64
 }
 
+type KvStorage struct {
+	mu sync.Mutex
+	s  map[string]string
+}
+
+type CallBackList struct {
+	mu         sync.Mutex
+	callbackLt map[ActId]CallBackTuple
+}
+
+type ActId struct {
+	term  int
+	index int
+}
+
+type CallBackTuple struct {
+	succeedFun func(string)
+	failFun    func(string)
+	valid      bool
+}
 
 func (kv *KVServer) Get(args *GetArgs, reply *GetReply) {
 	// Your code here.
+	//reply.Err = Err("Timeout")
+	kv.mu.Lock()
+	index, term, isLeader := kv.rf.Start(Op{GetF, args.Key, "", args.Id, args.Server})
+	fmt.Println("Starting in Get:", Op{GetF, args.Key, "", args.Id, args.Server})
+	fmt.Println("term:", term, "  isLeader:", isLeader, "  me:", kv.me)
+	kv.mu.Unlock()
+
+	if !isLeader {
+		reply.Err = Err(fmt.Sprint("Not leader"))
+		//fmt.Println("I'm not a leader:", args.Server)
+		return
+	}
+	//fmt.Println("I'm a leader:", args.Server)
+
+	var finished sync.Mutex
+	finished.Lock()
+
+	kv.callbackLt.reg(term,
+		index,
+		func(re string) {
+			reply.Value = re
+			finished.Unlock()
+			//log.Println("Done Get")
+		},
+		func(re string) {
+			reply.Err = Err("Exec fail")
+			finished.Unlock()
+		},
+	)
+	//log.Println("Hit Get")
+	finished.Lock()
+	finished.Unlock()
+	//log.Println("Done Get")
+
 }
 
 func (kv *KVServer) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 	// Your code here.
+	//reply.Err = Err("Timeout")
+
+	index := 0
+	term := 0
+	isLeader := false
+	kv.mu.Lock()
+	if args.Op == "Put" {
+		index, term, isLeader = kv.rf.Start(Op{PutF, args.Key, args.Value, args.Id, args.Server})
+		fmt.Println("Starting in Put:", Op{PutF, args.Key, args.Value, args.Id, args.Server})
+	} else {
+		index, term, isLeader = kv.rf.Start(Op{AppendF, args.Key, args.Value, args.Id, args.Server})
+		fmt.Println("Starting in App:", Op{AppendF, args.Key, args.Value, args.Id, args.Server})
+	}
+	fmt.Println("term:", term, "  isLeader:", isLeader, "  me:", kv.me)
+
+	kv.mu.Unlock()
+
+	if !isLeader {
+		reply.Err = Err(fmt.Sprint("Not leader:", args))
+		//fmt.Println("I'm not a leader:", args.Server)
+		return
+	}
+	//reply.Err = Err(fmt.Sprint("For god sake:", args))
+	//fmt.Println("I'm a leader:", args.Server, "   Err:", reply.Err)
+
+	var finished sync.Mutex
+	finished.Lock()
+
+	kv.callbackLt.reg(term,
+		index,
+		func(re string) {
+			finished.Unlock()
+			//fmt.Println("Done PutAppend:  ", reply.Err)
+		},
+		func(re string) {
+			reply.Err = Err("Exec fail")
+			finished.Unlock()
+		},
+	)
+	//log.Println("Hit PutAppend")
+	finished.Lock()
+	finished.Unlock()
+	//log.Println("Done PutAppend")
+
 }
 
 // the tester calls Kill() when a KVServer instance won't
@@ -87,11 +203,111 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 	kv.maxraftstate = maxraftstate
 
 	// You may need initialization code here.
+	kv.callbackLt.callbackLt = make(map[ActId]CallBackTuple)
+	kv.KvS.s = make(map[string]string)
+	kv.AppliedRPC = make(map[int64]int64)
 
 	kv.applyCh = make(chan raft.ApplyMsg)
 	kv.rf = raft.Make(servers, me, persister, kv.applyCh)
 
 	// You may need initialization code here.
+	go kv.applyF()
+	go kv.clearReg()
 
 	return kv
+}
+
+func (kv *KVServer) clearReg() {
+	for {
+		ms := 3000
+		time.Sleep(time.Duration(ms) * time.Millisecond)
+		term, _ := kv.rf.GetState()
+		if true { //!isLeader {
+			kv.callbackLt.clearF(term)
+		}
+
+	}
+
+}
+
+func (kv *KVServer) applyF() {
+	for {
+		////fmt.Println("1")
+		term2, isLeader2 := kv.rf.GetState()
+		fmt.Println("term:", term2, "  isLeader:", isLeader2, "  me:", kv.me)
+		a := <-kv.applyCh
+		////fmt.Println("2")
+		var op Op = a.Command.(Op)
+
+		re := ""
+		kv.mu.Lock()
+		kv.KvS.mu.Lock()
+		if op.Id.RpcSeq > kv.AppliedRPC[op.Id.ClientId] {
+			//if true {
+			switch op.Type {
+			case GetF:
+				re = kv.KvS.s[op.Key]
+				log.Println("GET --- Key:", op.Key, " Value:", re, "  ID:", op.Id)
+			case PutF:
+				kv.KvS.s[op.Key] = op.Value
+				re = op.Value
+				log.Println("Put --- Key:", op.Key, " Value:", re, "  ID:", op.Id)
+			case AppendF:
+				kv.KvS.s[op.Key] = kv.KvS.s[op.Key] + op.Value
+				re = kv.KvS.s[op.Key]
+				log.Println("APPEND --- Key:", op.Key, " Value:", re, "  ID:", op.Id)
+
+			}
+
+			if op.Id.RpcSeq != (kv.AppliedRPC[op.Id.ClientId] + 1) {
+				log.Fatal(op.Id.RpcSeq, " != ", kv.AppliedRPC[op.Id.ClientId], "+1")
+			}
+			kv.AppliedRPC[op.Id.ClientId] = op.Id.RpcSeq
+		} else {
+			fmt.Println("Escaping:", op.Id)
+		}
+		re = kv.KvS.s[op.Key]
+		kv.KvS.mu.Unlock()
+		kv.mu.Unlock()
+
+		term, isLeader := kv.rf.GetState()
+		succeed, _ := kv.callbackLt.popF(term, a.CommandIndex)
+		if isLeader {
+			//fmt.Println(op)
+			succeed(re)
+		} else {
+			////fmt.Println("4")
+			kv.callbackLt.clearF(term)
+
+		}
+	}
+}
+
+func (lt *CallBackList) reg(term int, index int, succeed func(string), fail func(string)) {
+	lt.mu.Lock()
+	defer lt.mu.Unlock()
+	lt.callbackLt[ActId{term, index}] = CallBackTuple{succeed, fail, true}
+}
+
+func (lt *CallBackList) popF(term int, index int) (func(string), func(string)) {
+	lt.mu.Lock()
+	defer lt.mu.Unlock()
+	re := lt.callbackLt[ActId{term, index}]
+	delete(lt.callbackLt, ActId{term, index})
+	if re.valid {
+		return re.succeedFun, re.failFun
+	} else {
+		return func(x string) {}, func(x string) {}
+	}
+}
+
+func (lt *CallBackList) clearF(term int) {
+	lt.mu.Lock()
+	defer lt.mu.Unlock()
+	for i, v := range lt.callbackLt {
+		if i.term < term {
+			v.failFun("")
+			delete(lt.callbackLt, i)
+		}
+	}
 }
