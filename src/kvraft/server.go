@@ -221,7 +221,7 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 	// You may need initialization code here.
 	go kv.applyF()
 	go kv.clearReg()
-	go kv.autoSnapshot()
+	//go kv.autoSnapshot()
 
 	return kv
 }
@@ -278,33 +278,7 @@ func (kv *KVServer) testTrim() {
 		e.Encode(kv.AppliedRPC)
 		e.Encode(kv.KvS.appliedIndex)
 		e.Encode(kv.KvS.s)
-		testConsistency("fff", w.Bytes(), kv.KvS.appliedIndex)
-		testConsistency("ggg", w.Bytes(), kv.KvS.appliedIndex)
-		testConsistency("hhh", w.Bytes(), kv.KvS.appliedIndex)
 		kv.rf.Snapshot(kv.KvS.appliedIndex, w.Bytes())
-		//testConsistency("hhh", w.Bytes(), kv.KvS.appliedIndex)
-
-	}
-}
-
-func testConsistency(tag string, snapshot []byte, Index int) {
-	r := bytes.NewBuffer(snapshot)
-	d := labgob.NewDecoder(r)
-	var AppliedRPC map[int64]int64
-	var appliedIndex int
-	var s map[string]string
-	if d.Decode(&AppliedRPC) != nil ||
-		d.Decode(&appliedIndex) != nil ||
-		d.Decode(&s) != nil {
-		//log.Println("??????????/Recovery not succeed!")
-		return
-	} else {
-		if appliedIndex != Index {
-			debug.PrintStack()
-			log.Fatalln(appliedIndex, " != ", Index, "   tag:", tag)
-		} else {
-			log.Println(appliedIndex, " = ", Index, "   tag:", tag)
-		}
 	}
 }
 
@@ -383,7 +357,7 @@ func (kv *KVServer) applyF() {
 			kv.callbackLt.clearF(term)
 		}
 
-		//kv.testTrim()
+		kv.testTrim()
 	}
 }
 

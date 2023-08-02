@@ -20,9 +20,7 @@ package raft
 import (
 	"bytes"
 	"fmt"
-	"log"
 	"math/rand"
-	"runtime/debug"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -217,8 +215,6 @@ func (rf *Raft) readPersist(data []byte) {
 		rf.snapshotTail = snapshotTail
 		rf.CommitIndex = snapshotTail.Index
 		rf.LastApplied = snapshotTail.Index
-
-		rf.testConsistency("aaa")
 		rf.mu.Unlock()
 	}
 }
@@ -252,10 +248,6 @@ func (rf *Raft) Snapshot(index int, snapshot []byte) {
 	copy(rf.logs, rf.logs)
 	//rf.logs = append(rf.logs,{})
 	rf.snapshot = snapshot
-
-	fmt.Println("index:", index, "   tailIndex:", rf.snapshotTail)
-	rf.testConsistency("bbb")
-
 }
 
 // example RequestVote RPC arguments structure.
@@ -371,7 +363,6 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 				copy(rf.logs, rf.logs)
 			}
 			rf.snapshotTail = args.SnapshotTail
-			rf.testConsistency("ccc")
 			if rf.CommitIndex < args.SnapshotTail.Index {
 				rf.CommitIndex = args.SnapshotTail.Index
 			}
@@ -993,24 +984,5 @@ func (rf *Raft) singlePack() {
 		rf.forwardCh <- 0
 		ms := 3
 		time.Sleep(time.Duration(ms) * time.Millisecond)
-	}
-}
-
-func (rf *Raft) testConsistency(tag string) {
-	r := bytes.NewBuffer(rf.snapshot)
-	d := labgob.NewDecoder(r)
-	var AppliedRPC map[int64]int64
-	var appliedIndex int
-	var s map[string]string
-	if d.Decode(&AppliedRPC) != nil ||
-		d.Decode(&appliedIndex) != nil ||
-		d.Decode(&s) != nil {
-		//log.Println("??????????/Recovery not succeed!")
-		return
-	} else {
-		if appliedIndex != rf.snapshotTail.OuterIndex {
-			debug.PrintStack()
-			log.Fatalln(appliedIndex, " != ", rf.snapshotTail.OuterIndex, "   tag:", tag)
-		}
 	}
 }
