@@ -1,8 +1,10 @@
 package kvraft
 
 import (
+	"bytes"
 	"fmt"
 	"log"
+	"runtime/debug"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -53,11 +55,13 @@ type KVServer struct {
 	callbackLt CallBackList
 	KvS        KvStorage
 	AppliedRPC map[int64]int64
+	persister  *raft.Persister
 }
 
 type KvStorage struct {
-	mu sync.Mutex
-	s  map[string]string
+	mu           sync.Mutex
+	appliedIndex int
+	s            map[string]string
 }
 
 type CallBackList struct {
@@ -205,7 +209,11 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 	// You may need initialization code here.
 	kv.callbackLt.callbackLt = make(map[ActId]CallBackTuple)
 	kv.KvS.s = make(map[string]string)
+	kv.KvS.appliedIndex = -1
 	kv.AppliedRPC = make(map[int64]int64)
+
+	kv.persister = persister
+	kv.installSnapshot(persister.ReadSnapshot())
 
 	kv.applyCh = make(chan raft.ApplyMsg)
 	kv.rf = raft.Make(servers, me, persister, kv.applyCh)
@@ -213,8 +221,91 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 	// You may need initialization code here.
 	go kv.applyF()
 	go kv.clearReg()
+	go kv.autoSnapshot()
 
 	return kv
+}
+
+func (kv *KVServer) installSnapshot(snapshot []byte) {
+	kv.mu.Lock()
+	kv.KvS.mu.Lock()
+	defer kv.KvS.mu.Unlock()
+	defer kv.mu.Unlock()
+
+	r := bytes.NewBuffer(snapshot)
+	d := labgob.NewDecoder(r)
+	var AppliedRPC map[int64]int64
+	var appliedIndex int
+	var s map[string]string
+	if d.Decode(&AppliedRPC) != nil ||
+		d.Decode(&appliedIndex) != nil ||
+		d.Decode(&s) != nil {
+		log.Println("??????????/Recovery not succeed!")
+		return
+	} else {
+		debug.PrintStack()
+		log.Println("before:", kv.AppliedRPC, "   appliedIndex:", appliedIndex, "   kv.KvS.appliedIndex:", kv.KvS.appliedIndex)
+		if appliedIndex > kv.KvS.appliedIndex {
+			kv.AppliedRPC = AppliedRPC
+			kv.KvS.appliedIndex = appliedIndex
+			kv.KvS.s = s
+		}
+		log.Println("Recovery succeed! :", kv.me, "   map:", kv.AppliedRPC)
+	}
+}
+
+func (kv *KVServer) autoSnapshot() {
+	for {
+		ms := 300
+		time.Sleep(time.Duration(ms) * time.Millisecond)
+		//term, _ := kv.rf.GetState()
+		kv.testTrim()
+	}
+}
+
+func (kv *KVServer) testTrim() {
+	if kv.persister.RaftStateSize() > kv.maxraftstate && kv.maxraftstate != -1 {
+		w := new(bytes.Buffer)
+		e := labgob.NewEncoder(w)
+		kv.mu.Lock()
+		kv.KvS.mu.Lock()
+		defer kv.KvS.mu.Unlock()
+		defer kv.mu.Unlock()
+
+		if kv.KvS.appliedIndex < 0 {
+			log.Panic("What???less then zero???")
+		}
+		e.Encode(kv.AppliedRPC)
+		e.Encode(kv.KvS.appliedIndex)
+		e.Encode(kv.KvS.s)
+		testConsistency("fff", w.Bytes(), kv.KvS.appliedIndex)
+		testConsistency("ggg", w.Bytes(), kv.KvS.appliedIndex)
+		testConsistency("hhh", w.Bytes(), kv.KvS.appliedIndex)
+		kv.rf.Snapshot(kv.KvS.appliedIndex, w.Bytes())
+		//testConsistency("hhh", w.Bytes(), kv.KvS.appliedIndex)
+
+	}
+}
+
+func testConsistency(tag string, snapshot []byte, Index int) {
+	r := bytes.NewBuffer(snapshot)
+	d := labgob.NewDecoder(r)
+	var AppliedRPC map[int64]int64
+	var appliedIndex int
+	var s map[string]string
+	if d.Decode(&AppliedRPC) != nil ||
+		d.Decode(&appliedIndex) != nil ||
+		d.Decode(&s) != nil {
+		//log.Println("??????????/Recovery not succeed!")
+		return
+	} else {
+		if appliedIndex != Index {
+			debug.PrintStack()
+			log.Fatalln(appliedIndex, " != ", Index, "   tag:", tag)
+		} else {
+			log.Println(appliedIndex, " = ", Index, "   tag:", tag)
+		}
+	}
 }
 
 func (kv *KVServer) clearReg() {
@@ -225,9 +316,7 @@ func (kv *KVServer) clearReg() {
 		if true { //!isLeader {
 			kv.callbackLt.clearF(term)
 		}
-
 	}
-
 }
 
 func (kv *KVServer) applyF() {
@@ -237,11 +326,25 @@ func (kv *KVServer) applyF() {
 		fmt.Println("term:", term2, "  isLeader:", isLeader2, "  me:", kv.me)
 		a := <-kv.applyCh
 		////fmt.Println("2")
-		var op Op = a.Command.(Op)
+		if a.SnapshotValid {
+			fmt.Println("sn:", a.SnapshotIndex, "  me:", kv.me)
+			kv.installSnapshot(a.Snapshot)
+		}
+		op, ok := a.Command.(Op)
+
+		if !ok {
+			fmt.Println("Warning!")
+			continue
+		}
 
 		re := ""
 		kv.mu.Lock()
 		kv.KvS.mu.Lock()
+		if kv.KvS.appliedIndex+1 != a.CommandIndex && kv.KvS.appliedIndex != -1 {
+			log.Panic(kv.KvS.appliedIndex, "+1 != ", a.CommandIndex, "  me:", kv.me)
+		}
+		kv.KvS.appliedIndex = a.CommandIndex
+		fmt.Println("xxx me:", kv.me, "  apply:", a.CommandIndex)
 		if op.Id.RpcSeq > kv.AppliedRPC[op.Id.ClientId] {
 			//if true {
 			switch op.Type {
@@ -278,8 +381,9 @@ func (kv *KVServer) applyF() {
 		} else {
 			////fmt.Println("4")
 			kv.callbackLt.clearF(term)
-
 		}
+
+		//kv.testTrim()
 	}
 }
 
