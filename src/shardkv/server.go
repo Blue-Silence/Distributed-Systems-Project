@@ -1,17 +1,35 @@
 package shardkv
 
+import (
+	"bytes"
+	"fmt"
+	"log"
+	"sync"
+	"time"
 
-import "6.5840/labrpc"
-import "6.5840/raft"
-import "sync"
-import "6.5840/labgob"
+	"6.5840/labgob"
+	"6.5840/labrpc"
+	"6.5840/raft"
+	"6.5840/shardctrler"
+)
 
-
+const (
+	PutF    = 1
+	GetF    = 2
+	AppendF = 3
+)
 
 type Op struct {
 	// Your definitions here.
 	// Field names must start with capital letters,
 	// otherwise RPC will break.
+	Type  int
+	Key   string
+	Value string
+
+	Id RpcId
+
+	Server int
 }
 
 type ShardKV struct {
@@ -25,15 +43,143 @@ type ShardKV struct {
 	maxraftstate int // snapshot if log grows this big
 
 	// Your definitions here.
+
+	callbackLt CallBackList
+	KvS        KvStorage
+	AppliedRPC map[int64]int64
+	persister  *raft.Persister
+
+	mck *shardctrler.Clerk
+
+	unique int64
 }
 
+type KvStorage struct {
+	mu              sync.Mutex
+	shardsAppointed []int
+	shardsGot       []int
+	appliedIndex    int
+	s               map[int](map[string]string)
+}
+
+type CallBackList struct {
+	mu         sync.Mutex
+	callbackLt map[ActId]CallBackTuple
+}
+
+type ActId struct {
+	term  int
+	index int
+}
+
+type CallBackTuple struct {
+	succeedFun func(string)
+	failFun    func(string)
+	valid      bool
+}
+
+func isIn(lt []int, t int) bool {
+	for _, v := range lt {
+		if v == t {
+			return true
+		}
+	}
+	return false
+}
 
 func (kv *ShardKV) Get(args *GetArgs, reply *GetReply) {
 	// Your code here.
+	kv.KvS.mu.Lock()
+	if !(isIn(kv.KvS.shardsGot, key2shard(args.Key)) && isIn(kv.KvS.shardsAppointed, key2shard(args.Key))) {
+		reply.Err = ErrWrongGroup
+		kv.KvS.mu.Unlock()
+		return
+	}
+	kv.KvS.mu.Unlock()
+
+	kv.mu.Lock()
+	index, term, isLeader := kv.rf.Start(Op{GetF, args.Key, "", args.Id, args.Server})
+	kv.mu.Unlock()
+
+	//if
+	if !isLeader {
+		reply.Err = ErrWrongLeader
+		fmt.Println("555")
+		return
+	}
+	fmt.Println("Starting:", args.Id, " on me:", kv.me, "  index:", index, "  unique:", kv.unique)
+	var finished sync.Mutex
+	finished.Lock()
+
+	kv.callbackLt.reg(term,
+		index,
+		func(re string) {
+			reply.Value = re
+			reply.Err = OK
+			finished.Unlock()
+		},
+		func(re string) {
+			reply.Err = Err("Exec fail")
+			finished.Unlock()
+		},
+	)
+	finished.Lock()
+	finished.Unlock()
+
 }
 
 func (kv *ShardKV) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 	// Your code here.
+
+	kv.KvS.mu.Lock()
+	if !(isIn(kv.KvS.shardsGot, key2shard(args.Key)) && isIn(kv.KvS.shardsAppointed, key2shard(args.Key))) {
+		reply.Err = ErrWrongGroup
+		fmt.Println("444")
+		fmt.Println(kv.KvS.shardsGot, "  ", kv.KvS.shardsAppointed, "   ", key2shard(args.Key))
+		kv.KvS.mu.Unlock()
+		return
+	}
+	kv.KvS.mu.Unlock()
+	fmt.Println("777")
+
+	index := 0
+	term := 0
+	isLeader := false
+	kv.mu.Lock()
+	if args.Op == "Put" {
+		index, term, isLeader = kv.rf.Start(Op{PutF, args.Key, args.Value, args.Id, args.Server})
+	} else {
+		index, term, isLeader = kv.rf.Start(Op{AppendF, args.Key, args.Value, args.Id, args.Server})
+	}
+
+	kv.mu.Unlock()
+
+	if !isLeader {
+		reply.Err = ErrWrongLeader
+		fmt.Println("888")
+		return
+	}
+
+	fmt.Println("Starting:", args.Id, " on me:", kv.me, "  index:", index, "  unique:", kv.unique)
+	fmt.Println("999")
+
+	var finished sync.Mutex
+	finished.Lock()
+
+	kv.callbackLt.reg(term,
+		index,
+		func(re string) {
+			reply.Err = OK
+			finished.Unlock()
+		},
+		func(re string) {
+			reply.Err = Err("Exec fail")
+			finished.Unlock()
+		},
+	)
+	finished.Lock()
+	finished.Unlock()
+
 }
 
 // the tester calls Kill() when a ShardKV instance won't
@@ -44,7 +190,6 @@ func (kv *ShardKV) Kill() {
 	kv.rf.Kill()
 	// Your code here, if desired.
 }
-
 
 // servers[] contains the ports of the servers in this group.
 //
@@ -92,6 +237,229 @@ func StartServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persister,
 	kv.applyCh = make(chan raft.ApplyMsg)
 	kv.rf = raft.Make(servers, me, persister, kv.applyCh)
 
+	// My initialization code here.
+	kv.callbackLt.callbackLt = make(map[ActId]CallBackTuple)
+	kv.KvS.s = make(map[int](map[string]string))
+	kv.KvS.appliedIndex = -1
+	kv.AppliedRPC = make(map[int64]int64)
+	fmt.Println("What??? From:", kv.me)
+
+	kv.persister = persister
+	//kv.installSnapshot(persister.ReadSnapshot())
+
+	kv.mck = shardctrler.MakeClerk(kv.ctrlers)
+
+	shardsAppointed := []int{}
+	qS := kv.mck.Query(-1).Shards
+	fmt.Println("Shards:", qS)
+	for i, v := range qS {
+		if v == gid {
+			shardsAppointed = append(shardsAppointed, i)
+		}
+	}
+	kv.KvS.shardsAppointed = shardsAppointed
+	for _, v := range shardsAppointed {
+		kv.KvS.s[v] = make(map[string]string)
+	}
+
+	kv.installSnapshot(persister.ReadSnapshot())
+
+	kv.unique = nrand()
+
+	go kv.applyF()
+	go kv.clearReg()
+
+	go kv.autoUpdateShards()
 
 	return kv
+}
+
+func (kv *ShardKV) autoUpdateShards() {
+	for {
+		ms := 50
+		time.Sleep(time.Duration(ms) * time.Millisecond)
+		kv.KvS.mu.Lock()
+		//term, _ := kv.rf.GetState()
+		shardsAppointed := []int{}
+		qS := kv.mck.Query(-1).Shards
+		//fmt.Println("Shards:", qS)
+		for i, v := range qS {
+			if v == kv.gid {
+				shardsAppointed = append(shardsAppointed, i)
+			}
+		}
+
+		//fmt.Println()
+
+		kv.KvS.shardsAppointed = shardsAppointed
+
+		//The following is evil.Should be corrected later.
+		for _, v := range shardsAppointed {
+			if !isIn(kv.KvS.shardsGot, v) {
+				kv.KvS.s[v] = make(map[string]string)
+			}
+		}
+		kv.KvS.shardsGot = make([]int, len(shardsAppointed))
+		copy(kv.KvS.shardsGot, shardsAppointed)
+		//Evil stops here.
+
+		kv.KvS.mu.Unlock()
+	}
+}
+
+func (kv *ShardKV) installSnapshot(snapshot []byte) {
+	kv.mu.Lock()
+	kv.KvS.mu.Lock()
+	defer kv.KvS.mu.Unlock()
+	defer kv.mu.Unlock()
+
+	r := bytes.NewBuffer(snapshot)
+	d := labgob.NewDecoder(r)
+	var AppliedRPC map[int64]int64
+	var appliedIndex int
+	var shardsAppointed []int
+	var shardsGot []int
+	var s map[int](map[string]string)
+	if d.Decode(&AppliedRPC) != nil ||
+		d.Decode(&appliedIndex) != nil ||
+		d.Decode(&shardsAppointed) != nil ||
+		d.Decode(&shardsGot) != nil ||
+		d.Decode(&s) != nil {
+		return
+	} else {
+		if appliedIndex > kv.KvS.appliedIndex {
+			kv.AppliedRPC = AppliedRPC
+			kv.KvS.appliedIndex = appliedIndex
+			kv.KvS.shardsAppointed = shardsAppointed
+			kv.KvS.shardsGot = shardsGot
+			kv.KvS.s = s
+		}
+	}
+}
+
+func (kv *ShardKV) testTrim() {
+	if kv.persister.RaftStateSize() > kv.maxraftstate && kv.maxraftstate != -1 {
+		w := new(bytes.Buffer)
+		e := labgob.NewEncoder(w)
+		kv.mu.Lock()
+		kv.KvS.mu.Lock()
+		defer kv.KvS.mu.Unlock()
+		defer kv.mu.Unlock()
+
+		if kv.KvS.appliedIndex < 0 {
+			log.Panic("What???less then zero???")
+		}
+		e.Encode(kv.AppliedRPC)
+		e.Encode(kv.KvS.appliedIndex)
+		e.Encode(kv.KvS.shardsAppointed)
+		e.Encode(kv.KvS.shardsGot)
+		e.Encode(kv.KvS.s)
+		kv.rf.Snapshot(kv.KvS.appliedIndex, w.Bytes())
+	}
+}
+
+func (kv *ShardKV) clearReg() {
+	for {
+		ms := 3000
+		time.Sleep(time.Duration(ms) * time.Millisecond)
+		term, _ := kv.rf.GetState()
+		if true { //!isLeader {
+			kv.callbackLt.clearF(term)
+		}
+	}
+}
+
+func (kv *ShardKV) applyF() {
+	for {
+		a := <-kv.applyCh
+		if a.SnapshotValid {
+			kv.installSnapshot(a.Snapshot)
+		}
+		op, ok := a.Command.(Op)
+
+		if !ok {
+			//fmt.Println("Warning!")
+			continue
+		}
+
+		re := ""
+		kv.mu.Lock()
+		kv.KvS.mu.Lock()
+		if kv.KvS.appliedIndex+1 != a.CommandIndex && kv.KvS.appliedIndex != -1 {
+			log.Panic(kv.KvS.appliedIndex, "+1 != ", a.CommandIndex, "  me:", kv.me)
+		}
+		fmt.Println("Completing:", op.Id, " on me:", kv.me, "  index:", a.CommandIndex, " applied:", kv.AppliedRPC, "  unique:", kv.unique)
+		kv.KvS.appliedIndex = a.CommandIndex
+		if op.Id.RpcSeq > kv.AppliedRPC[op.Id.ClientId] {
+			//if true {
+			switch op.Type {
+			case GetF:
+				//re = kv.KvS.s[key2shard(op.Key)][op.Key]
+				fmt.Println("111")
+			case PutF:
+				kv.KvS.s[key2shard(op.Key)][op.Key] = op.Value
+				//re = op.Value
+				fmt.Println("222")
+			case AppendF:
+				kv.KvS.s[key2shard(op.Key)][op.Key] = kv.KvS.s[key2shard(op.Key)][op.Key] + op.Value
+				//re = kv.KvS.s[key2shard(op.Key)][op.Key]
+				fmt.Println("333")
+
+			}
+
+			log.Println("From:", op.Id.ClientId, "  to:", kv.me)
+			/*if op.Id.RpcSeq != (kv.AppliedRPC[op.Id.ClientId] + 1) {
+				log.Fatal(op.Id.RpcSeq, " != ", kv.AppliedRPC[op.Id.ClientId], "+1")
+			} else {
+				log.Println(op.Id.RpcSeq, " = ", kv.AppliedRPC[op.Id.ClientId], "+1")
+			}*/
+			fmt.Println("Before:", kv.AppliedRPC, "  on me:", kv.me)
+			kv.AppliedRPC[op.Id.ClientId] = op.Id.RpcSeq
+			fmt.Println("After:", kv.AppliedRPC, "  on me:", kv.me)
+		}
+
+		re = kv.KvS.s[key2shard(op.Key)][op.Key]
+		kv.KvS.mu.Unlock()
+		kv.mu.Unlock()
+
+		term, isLeader := kv.rf.GetState()
+		succeed, _ := kv.callbackLt.popF(term, a.CommandIndex)
+		if isLeader {
+			succeed(re)
+		} else {
+			kv.callbackLt.clearF(term)
+		}
+		fmt.Println("AfterAfter:", kv.AppliedRPC, "  on me:", kv.me)
+		kv.testTrim()
+		fmt.Println("AfterAfterAfter:", kv.AppliedRPC, "  on me:", kv.me)
+	}
+}
+
+func (lt *CallBackList) reg(term int, index int, succeed func(string), fail func(string)) {
+	lt.mu.Lock()
+	defer lt.mu.Unlock()
+	lt.callbackLt[ActId{term, index}] = CallBackTuple{succeed, fail, true}
+}
+
+func (lt *CallBackList) popF(term int, index int) (func(string), func(string)) {
+	lt.mu.Lock()
+	defer lt.mu.Unlock()
+	re := lt.callbackLt[ActId{term, index}]
+	delete(lt.callbackLt, ActId{term, index})
+	if re.valid {
+		return re.succeedFun, re.failFun
+	} else {
+		return func(x string) {}, func(x string) {}
+	}
+}
+
+func (lt *CallBackList) clearF(term int) {
+	lt.mu.Lock()
+	defer lt.mu.Unlock()
+	for i, v := range lt.callbackLt {
+		if i.term < term {
+			v.failFun("")
+			delete(lt.callbackLt, i)
+		}
+	}
 }

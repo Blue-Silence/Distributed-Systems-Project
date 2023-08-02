@@ -306,16 +306,16 @@ func (sc *ShardCtrler) applyF() {
 			switch op.Type {
 			case JoinF:
 				sc.joinAction(op)
-				fmt.Println("Join --- op:", op, "   Configs:", sc.configs)
+				//fmt.Println("Join --- op:", op, "   Configs:", sc.configs)
 			case LeaveF:
 				sc.leaveAction(op)
-				fmt.Println("Leave --- op:", op, "   Configs:", sc.configs)
+				//fmt.Println("Leave --- op:", op, "   Configs:", sc.configs)
 			case MoveF:
 				sc.moveAction(op)
-				fmt.Println("Move --- op:", op, "   Configs:", sc.configs)
+				//fmt.Println("Move --- op:", op, "   Configs:", sc.configs)
 			case QueryF:
 				sc.queryAction(op)
-				fmt.Println("Query --- op:", op, "   Configs:", sc.configs)
+				//fmt.Println("Query --- op:", op, "   Configs:", sc.configs)
 			}
 
 			if op.Id.RpcSeq != (sc.AppliedRPC[op.Id.ClientId] + 1) {
@@ -458,7 +458,7 @@ func rebalance(old Config) Config {
 		}
 	}
 
-	fmt.Println("Freed:", freed)
+	//fmt.Println("Freed:", freed)
 
 	var lt ByGIP
 	for _, v := range gip2shard {
@@ -473,7 +473,7 @@ func rebalance(old Config) Config {
 			lt[i] = v
 		}
 	}
-	fmt.Println("2  lt:", lt)
+	//fmt.Println("2  lt:", lt)
 	for i, v := range lt {
 		for len(freed) > 0 {
 			v.shards = append(v.shards, freed[0])
@@ -481,7 +481,7 @@ func rebalance(old Config) Config {
 			lt[i] = v
 		}
 	}
-	fmt.Println("3  lt:", lt)
+	//fmt.Println("3  lt:", lt)
 	for _, v := range lt {
 		for _, v1 := range v.shards {
 			new.Shards[v1] = v.GIP
