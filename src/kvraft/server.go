@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"fmt"
 	"log"
-	"runtime/debug"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -85,16 +84,12 @@ func (kv *KVServer) Get(args *GetArgs, reply *GetReply) {
 	//reply.Err = Err("Timeout")
 	kv.mu.Lock()
 	index, term, isLeader := kv.rf.Start(Op{GetF, args.Key, "", args.Id, args.Server})
-	fmt.Println("Starting in Get:", Op{GetF, args.Key, "", args.Id, args.Server})
-	fmt.Println("term:", term, "  isLeader:", isLeader, "  me:", kv.me)
 	kv.mu.Unlock()
 
 	if !isLeader {
 		reply.Err = Err(fmt.Sprint("Not leader"))
-		//fmt.Println("I'm not a leader:", args.Server)
 		return
 	}
-	//fmt.Println("I'm a leader:", args.Server)
 
 	var finished sync.Mutex
 	finished.Lock()
@@ -104,17 +99,14 @@ func (kv *KVServer) Get(args *GetArgs, reply *GetReply) {
 		func(re string) {
 			reply.Value = re
 			finished.Unlock()
-			//log.Println("Done Get")
 		},
 		func(re string) {
 			reply.Err = Err("Exec fail")
 			finished.Unlock()
 		},
 	)
-	//log.Println("Hit Get")
 	finished.Lock()
 	finished.Unlock()
-	//log.Println("Done Get")
 
 }
 
@@ -128,22 +120,16 @@ func (kv *KVServer) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 	kv.mu.Lock()
 	if args.Op == "Put" {
 		index, term, isLeader = kv.rf.Start(Op{PutF, args.Key, args.Value, args.Id, args.Server})
-		fmt.Println("Starting in Put:", Op{PutF, args.Key, args.Value, args.Id, args.Server})
 	} else {
 		index, term, isLeader = kv.rf.Start(Op{AppendF, args.Key, args.Value, args.Id, args.Server})
-		fmt.Println("Starting in App:", Op{AppendF, args.Key, args.Value, args.Id, args.Server})
 	}
-	fmt.Println("term:", term, "  isLeader:", isLeader, "  me:", kv.me)
 
 	kv.mu.Unlock()
 
 	if !isLeader {
 		reply.Err = Err(fmt.Sprint("Not leader:", args))
-		//fmt.Println("I'm not a leader:", args.Server)
 		return
 	}
-	//reply.Err = Err(fmt.Sprint("For god sake:", args))
-	//fmt.Println("I'm a leader:", args.Server, "   Err:", reply.Err)
 
 	var finished sync.Mutex
 	finished.Lock()
@@ -152,17 +138,14 @@ func (kv *KVServer) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 		index,
 		func(re string) {
 			finished.Unlock()
-			//fmt.Println("Done PutAppend:  ", reply.Err)
 		},
 		func(re string) {
 			reply.Err = Err("Exec fail")
 			finished.Unlock()
 		},
 	)
-	//log.Println("Hit PutAppend")
 	finished.Lock()
 	finished.Unlock()
-	//log.Println("Done PutAppend")
 
 }
 
@@ -240,17 +223,13 @@ func (kv *KVServer) installSnapshot(snapshot []byte) {
 	if d.Decode(&AppliedRPC) != nil ||
 		d.Decode(&appliedIndex) != nil ||
 		d.Decode(&s) != nil {
-		log.Println("??????????/Recovery not succeed!")
 		return
 	} else {
-		debug.PrintStack()
-		log.Println("before:", kv.AppliedRPC, "   appliedIndex:", appliedIndex, "   kv.KvS.appliedIndex:", kv.KvS.appliedIndex)
 		if appliedIndex > kv.KvS.appliedIndex {
 			kv.AppliedRPC = AppliedRPC
 			kv.KvS.appliedIndex = appliedIndex
 			kv.KvS.s = s
 		}
-		log.Println("Recovery succeed! :", kv.me, "   map:", kv.AppliedRPC)
 	}
 }
 
@@ -295,19 +274,14 @@ func (kv *KVServer) clearReg() {
 
 func (kv *KVServer) applyF() {
 	for {
-		////fmt.Println("1")
-		term2, isLeader2 := kv.rf.GetState()
-		fmt.Println("term:", term2, "  isLeader:", isLeader2, "  me:", kv.me)
 		a := <-kv.applyCh
-		////fmt.Println("2")
 		if a.SnapshotValid {
-			fmt.Println("sn:", a.SnapshotIndex, "  me:", kv.me)
 			kv.installSnapshot(a.Snapshot)
 		}
 		op, ok := a.Command.(Op)
 
 		if !ok {
-			fmt.Println("Warning!")
+			//fmt.Println("Warning!")
 			continue
 		}
 
@@ -318,21 +292,17 @@ func (kv *KVServer) applyF() {
 			log.Panic(kv.KvS.appliedIndex, "+1 != ", a.CommandIndex, "  me:", kv.me)
 		}
 		kv.KvS.appliedIndex = a.CommandIndex
-		fmt.Println("xxx me:", kv.me, "  apply:", a.CommandIndex)
 		if op.Id.RpcSeq > kv.AppliedRPC[op.Id.ClientId] {
 			//if true {
 			switch op.Type {
 			case GetF:
 				re = kv.KvS.s[op.Key]
-				log.Println("GET --- Key:", op.Key, " Value:", re, "  ID:", op.Id)
 			case PutF:
 				kv.KvS.s[op.Key] = op.Value
 				re = op.Value
-				log.Println("Put --- Key:", op.Key, " Value:", re, "  ID:", op.Id)
 			case AppendF:
 				kv.KvS.s[op.Key] = kv.KvS.s[op.Key] + op.Value
 				re = kv.KvS.s[op.Key]
-				log.Println("APPEND --- Key:", op.Key, " Value:", re, "  ID:", op.Id)
 
 			}
 
@@ -340,9 +310,8 @@ func (kv *KVServer) applyF() {
 				log.Fatal(op.Id.RpcSeq, " != ", kv.AppliedRPC[op.Id.ClientId], "+1")
 			}
 			kv.AppliedRPC[op.Id.ClientId] = op.Id.RpcSeq
-		} else {
-			fmt.Println("Escaping:", op.Id)
 		}
+
 		re = kv.KvS.s[op.Key]
 		kv.KvS.mu.Unlock()
 		kv.mu.Unlock()
@@ -350,10 +319,8 @@ func (kv *KVServer) applyF() {
 		term, isLeader := kv.rf.GetState()
 		succeed, _ := kv.callbackLt.popF(term, a.CommandIndex)
 		if isLeader {
-			//fmt.Println(op)
 			succeed(re)
 		} else {
-			////fmt.Println("4")
 			kv.callbackLt.clearF(term)
 		}
 

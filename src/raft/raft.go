@@ -19,7 +19,6 @@ package raft
 
 import (
 	"bytes"
-	"fmt"
 	"math/rand"
 	"sync"
 	"sync/atomic"
@@ -935,9 +934,7 @@ func (rf *Raft) finalCommit() {
 		switch {
 		case rf.snapshotTail.Index > rf.LastApplied:
 			msg = ApplyMsg{CommandValid: false, SnapshotValid: true, Snapshot: rf.snapshot, SnapshotIndex: rf.snapshotTail.OuterIndex, SnapshotTerm: rf.snapshotTail.Term}
-			fmt.Println("before:", rf.LastApplied)
 			rf.LastApplied = rf.snapshotTail.Index
-			fmt.Println("after:", rf.LastApplied)
 			rf.mu.Unlock()
 			rf.applyCh <- msg
 			rf.mu.Lock()

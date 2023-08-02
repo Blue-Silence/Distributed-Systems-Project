@@ -2,7 +2,6 @@ package kvraft
 
 import (
 	"crypto/rand"
-	"fmt"
 	"math/big"
 	"sync"
 
@@ -62,19 +61,14 @@ func (ck *Clerk) Get(key string) string {
 
 	ct := 1
 	for {
-		fmt.Println("Get index:", ct, " Sending:", args)
-
 		var reply GetReply
-		//log.Println("Client:", args)
 
 		args.Server = ck.currentLeader
 		ok := ck.servers[ck.currentLeader].Call("KVServer.Get", &args, &reply)
-		fmt.Println("Get index:", ct, " Sending:", args, "  after call")
 		ct++
 		if !ok || reply.Err != Err("") {
 			ck.currentLeader = (ck.currentLeader + 1) % len(ck.servers)
 		} else {
-			//log.Println("Client:", args)
 			re = reply.Value
 			break
 		}
@@ -107,25 +101,15 @@ func (ck *Clerk) PutAppend(key string, value string, op string) {
 
 	ct := 1
 	for {
-		fmt.Println("PA index:", ct, " Sending:", args)
 
 		var reply PutAppendReply
 		args.Server = ck.currentLeader
-		//fmt.Println("Args:", args)
 		ok := ck.servers[ck.currentLeader].Call("KVServer.PutAppend", &args, &reply)
-		fmt.Println("PA index:", ct, " Sending:", args, "  after call")
 		ct++
 
 		if !ok || reply.Err != Err("") {
-			//fmt.Println("Emm?")
-			/*if !ok {
-				fmt.Println("Timeout?")
-			} else {
-				fmt.Println(reply.Err, "  index:", ck.currentLeader)
-			}*/
 			ck.currentLeader = (ck.currentLeader + 1) % len(ck.servers)
 		} else {
-			//fmt.Println("Client:", args)
 			break
 		}
 
