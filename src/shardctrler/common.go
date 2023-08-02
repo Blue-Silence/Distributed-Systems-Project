@@ -36,38 +36,65 @@ type Err string
 
 type JoinArgs struct {
 	Servers map[int][]string // new GID -> servers mappings
+
+	Id RpcId
+
+	Server int
 }
 
 type JoinReply struct {
 	WrongLeader bool
 	Err         Err
+
+	Config Config
 }
 
 type LeaveArgs struct {
 	GIDs []int
+
+	Id RpcId
+
+	Server int
 }
 
 type LeaveReply struct {
 	WrongLeader bool
 	Err         Err
+
+	Config Config
 }
 
 type MoveArgs struct {
 	Shard int
 	GID   int
+
+	Id RpcId
+
+	Server int
 }
 
 type MoveReply struct {
 	WrongLeader bool
 	Err         Err
+
+	Config Config
 }
 
 type QueryArgs struct {
 	Num int // desired config number
+
+	Id RpcId
+
+	Server int
 }
 
 type QueryReply struct {
 	WrongLeader bool
 	Err         Err
 	Config      Config
+}
+
+type RpcId struct {
+	ClientId int64
+	RpcSeq   int64
 }
