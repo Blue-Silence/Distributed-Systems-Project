@@ -14,9 +14,10 @@ import (
 )
 
 const (
-	PutF    = 1
-	GetF    = 2
-	AppendF = 3
+	SetConfig = 0
+	PutF      = 1
+	GetF      = 2
+	AppendF   = 3
 )
 
 type Op struct {
@@ -26,6 +27,8 @@ type Op struct {
 	Type  int
 	Key   string
 	Value string
+
+	CFG shardctrler.Config
 
 	Id RpcId
 
@@ -48,6 +51,8 @@ type ShardKV struct {
 	KvS        KvStorage
 	AppliedRPC map[int64]int64
 	persister  *raft.Persister
+
+	configs []shardctrler.Config
 
 	mck *shardctrler.Clerk
 
@@ -98,7 +103,7 @@ func (kv *ShardKV) Get(args *GetArgs, reply *GetReply) {
 	kv.KvS.mu.Unlock()
 
 	kv.mu.Lock()
-	index, term, isLeader := kv.rf.Start(Op{GetF, args.Key, "", args.Id, args.Server})
+	index, term, isLeader := kv.rf.Start(Op{GetF, args.Key, "", shardctrler.Config{}, args.Id, args.Server})
 	kv.mu.Unlock()
 
 	//if
@@ -147,9 +152,9 @@ func (kv *ShardKV) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 	isLeader := false
 	kv.mu.Lock()
 	if args.Op == "Put" {
-		index, term, isLeader = kv.rf.Start(Op{PutF, args.Key, args.Value, args.Id, args.Server})
+		index, term, isLeader = kv.rf.Start(Op{PutF, args.Key, args.Value, shardctrler.Config{}, args.Id, args.Server})
 	} else {
-		index, term, isLeader = kv.rf.Start(Op{AppendF, args.Key, args.Value, args.Id, args.Server})
+		index, term, isLeader = kv.rf.Start(Op{AppendF, args.Key, args.Value, shardctrler.Config{}, args.Id, args.Server})
 	}
 
 	kv.mu.Unlock()
@@ -249,7 +254,7 @@ func StartServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persister,
 
 	kv.mck = shardctrler.MakeClerk(kv.ctrlers)
 
-	shardsAppointed := []int{}
+	/*shardsAppointed := []int{}
 	qS := kv.mck.Query(-1).Shards
 	fmt.Println("Shards:", qS)
 	for i, v := range qS {
@@ -260,7 +265,7 @@ func StartServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persister,
 	kv.KvS.shardsAppointed = shardsAppointed
 	for _, v := range shardsAppointed {
 		kv.KvS.s[v] = make(map[string]string)
-	}
+	}*/
 
 	kv.installSnapshot(persister.ReadSnapshot())
 
@@ -278,12 +283,20 @@ func (kv *ShardKV) autoUpdateShards() {
 	for {
 		ms := 50
 		time.Sleep(time.Duration(ms) * time.Millisecond)
+
+		configTail := kv.mck.Query(-1)
+		for i := len(kv.configs); i <= configTail.Num; i++ {
+			config := kv.mck.Query(i)
+			kv.rf.Start(Op{SetConfig, "", "", config, RpcId{-1, 1024}, -1})
+		}
+		//if(config.Num)
+
 		kv.KvS.mu.Lock()
 		//term, _ := kv.rf.GetState()
 		shardsAppointed := []int{}
-		qS := kv.mck.Query(-1).Shards
+
 		//fmt.Println("Shards:", qS)
-		for i, v := range qS {
+		for i, v := range configTail.Shards {
 			if v == kv.gid {
 				shardsAppointed = append(shardsAppointed, i)
 			}
@@ -404,18 +417,15 @@ func (kv *ShardKV) applyF() {
 				kv.KvS.s[key2shard(op.Key)][op.Key] = kv.KvS.s[key2shard(op.Key)][op.Key] + op.Value
 				//re = kv.KvS.s[key2shard(op.Key)][op.Key]
 				fmt.Println("333")
+			case SetConfig:
+				// Do SOMETHING TOMORROW. TO BE DONE
 
 			}
 
 			log.Println("From:", op.Id.ClientId, "  to:", kv.me)
-			/*if op.Id.RpcSeq != (kv.AppliedRPC[op.Id.ClientId] + 1) {
-				log.Fatal(op.Id.RpcSeq, " != ", kv.AppliedRPC[op.Id.ClientId], "+1")
-			} else {
-				log.Println(op.Id.RpcSeq, " = ", kv.AppliedRPC[op.Id.ClientId], "+1")
-			}*/
-			fmt.Println("Before:", kv.AppliedRPC, "  on me:", kv.me)
-			kv.AppliedRPC[op.Id.ClientId] = op.Id.RpcSeq
-			fmt.Println("After:", kv.AppliedRPC, "  on me:", kv.me)
+			if op.Type != SetConfig {
+				kv.AppliedRPC[op.Id.ClientId] = op.Id.RpcSeq
+			}
 		}
 
 		re = kv.KvS.s[key2shard(op.Key)][op.Key]
