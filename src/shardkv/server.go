@@ -52,7 +52,8 @@ type ShardKV struct {
 	AppliedRPC map[int64]int64
 	persister  *raft.Persister
 
-	configs []shardctrler.Config
+	configs      []shardctrler.Config
+	isInTransfer sync.Mutex
 
 	mck *shardctrler.Clerk
 
@@ -65,6 +66,7 @@ type KvStorage struct {
 	ShardsGot       []int
 	AppliedIndex    int
 	S               map[int](map[string]string)
+	OldS            [](map[int](map[string]string))
 }
 
 type CallBackList struct {
@@ -414,6 +416,9 @@ func (kv *ShardKV) clearReg() {
 
 func (kv *ShardKV) applyF() {
 	for {
+		kv.isInTransfer.Lock()
+		kv.isInTransfer.Unlock()
+
 		a := <-kv.applyCh
 		if a.SnapshotValid {
 			kv.installSnapshot(a.Snapshot)
@@ -448,34 +453,12 @@ func (kv *ShardKV) applyF() {
 				fmt.Println("333")
 			case SetConfig:
 				// Do SOMETHING TOMORROW. TO BE DONE
-				//The following is evil.Should be corrected later.
-				shardsAppointed := []int{}
-
-				//fmt.Println("Shards:", qS)
-				for i, v := range op.CFG.Shards {
-					if v == kv.gid {
-						shardsAppointed = append(shardsAppointed, i)
-					}
-				}
-
-				for _, v := range shardsAppointed {
-					if !isIn(kv.KvS.ShardsGot, v) {
-						kv.KvS.S[v] = make(map[string]string)
-						fmt.Println("Creating map:", v, "  on me:", kv.me, "  unique:", kv.unique)
-					}
-				}
-				kv.KvS.ShardsGot = make([]int, len(shardsAppointed))
-				kv.KvS.ShardsAppointed = make([]int, len(shardsAppointed))
-				copy(kv.KvS.ShardsGot, shardsAppointed)
-				copy(kv.KvS.ShardsAppointed, shardsAppointed)
-				fmt.Println("Setting own:", shardsAppointed, "  on me:", kv.me, "  unique:", kv.unique, "  Config:", op.CFG)
-				//Evil stops here.
-				kv.configs = append(kv.configs, op.CFG)
+				kv.applyNewConfig(op.CFG)
 
 			}
 
 			log.Println("From:", op.Id.ClientId, "  to:", kv.me)
-			//if op.Type != SetConfig {
+
 			kv.AppliedRPC[op.Id.ClientId] = op.Id.RpcSeq
 			//}
 		}
@@ -492,6 +475,100 @@ func (kv *ShardKV) applyF() {
 		}
 		kv.testTrim()
 	}
+}
+
+func (kv *ShardKV) applyNewConfig(CFG shardctrler.Config) {
+
+	fmt.Println("Print Configuration:", CFG)
+
+	kv.isInTransfer.Lock()
+	if len(kv.configs) == len(kv.KvS.OldS) {
+		kv.KvS.OldS = append(kv.KvS.OldS, kv.KvS.S)
+	} else {
+		log.Panicln("!!!")
+	}
+
+	shardsAppointed := []int{}
+	shardsNew := []int{}
+	shardsNeedGet := []int{}
+
+	var CfgOld shardctrler.Config
+
+	for i, v := range CFG.Shards {
+		if v == kv.gid {
+			shardsAppointed = append(shardsAppointed, i)
+		}
+	}
+
+	//The following is evil.Should be corrected later.
+	if len(kv.configs) == 0 {
+		shardsNew = make([]int, len(shardsAppointed))
+		copy(shardsNew, shardsAppointed)
+	} else {
+		CfgOld = kv.configs[len(kv.configs)-1]
+		for _, shard := range shardsAppointed {
+			switch {
+			case CfgOld.Shards[shard] == 0:
+				shardsNew = append(shardsNew, shard)
+			case CfgOld.Shards[shard] == kv.gid:
+				//Nothing
+			default:
+				shardsNeedGet = append(shardsNeedGet, shard)
+			}
+
+		}
+	}
+
+	fmt.Println("shardsAppointed:", shardsAppointed, "  shardsNew", shardsNew)
+
+	/*for _, v := range shardsAppointed {
+		if !isIn(kv.KvS.ShardsGot, v) {
+			kv.KvS.S[v] = make(map[string]string)
+			fmt.Println("Creating map:", v, "  on me:", kv.me, "  unique:", kv.unique)
+		}
+	}
+	kv.KvS.ShardsGot = make([]int, len(shardsAppointed))
+	kv.KvS.ShardsAppointed = make([]int, len(shardsAppointed))
+	copy(kv.KvS.ShardsGot, shardsAppointed)
+	copy(kv.KvS.ShardsAppointed, shardsAppointed)*/
+
+	for _, v := range shardsNew {
+		kv.KvS.S[v] = make(map[string]string)
+		fmt.Println("Creating map:", v, "  on me:", kv.me, "  unique:", kv.unique)
+	}
+
+	kv.KvS.ShardsAppointed = append(kv.KvS.ShardsAppointed, shardsNew...) //make([]int, len(shardsAppointed))
+	kv.KvS.ShardsGot = make([]int, len(kv.KvS.ShardsAppointed))
+	copy(kv.KvS.ShardsGot, kv.KvS.ShardsAppointed)
+
+	fmt.Println("Setting own:", kv.KvS.ShardsAppointed, "  on me:", kv.me, "  unique:", kv.unique, "  gid:", kv.gid, "  Config:", CFG)
+	//Evil stops here.
+
+	go kv.getNewShards(len(kv.configs), shardsNeedGet, CfgOld, CFG)
+
+}
+
+func (kv *ShardKV) getNewShards(newIndex int, lt []int, CfgOld shardctrler.Config, CfgNew shardctrler.Config) {
+
+	//Evil begin.
+	for _, v := range lt {
+		kv.KvS.S[v] = make(map[string]string)
+		fmt.Println("Creating map:", v, "  on me:", kv.me, "  unique:", kv.unique)
+	}
+	kv.KvS.ShardsAppointed = append(kv.KvS.ShardsAppointed, lt...) //make([]int, len(shardsAppointed))
+	kv.KvS.ShardsGot = make([]int, len(kv.KvS.ShardsAppointed))
+	copy(kv.KvS.ShardsGot, kv.KvS.ShardsAppointed)
+	//Evil end.
+
+	//DO SOMETHING HERE. TO BE DONE.
+	kv.isInTransfer.Unlock()
+
+	kv.mu.Lock()
+	kv.configs = append(kv.configs, CfgNew)
+	fmt.Println("Need to get:", lt, "  on me:", kv.me, "  unique:", kv.unique, "  gid:", kv.gid, "  Config:", CfgNew)
+	kv.mu.Unlock()
+	//fmt.Println("Cfg:")
+
 }
 
 func (lt *CallBackList) reg(term int, index int, succeed func(string), fail func(string)) {
