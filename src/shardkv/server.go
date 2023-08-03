@@ -63,7 +63,6 @@ type ShardKV struct {
 type KvStorage struct {
 	//mu              sync.Mutex
 	ShardsAppointed []int
-	ShardsGot       []int
 	AppliedIndex    int
 	S               map[int](map[string]string)
 	OldS            [](map[int](map[string]string))
@@ -97,7 +96,7 @@ func isIn(lt []int, t int) bool {
 func (kv *ShardKV) Get(args *GetArgs, reply *GetReply) {
 	// Your code here.
 	kv.mu.Lock()
-	if !(isIn(kv.KvS.ShardsGot, key2shard(args.Key)) && isIn(kv.KvS.ShardsAppointed, key2shard(args.Key))) {
+	if !isIn(kv.KvS.ShardsAppointed, key2shard(args.Key)) {
 		reply.Err = ErrWrongGroup
 		kv.mu.Unlock()
 		return
@@ -139,10 +138,10 @@ func (kv *ShardKV) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 	// Your code here.
 
 	kv.mu.Lock()
-	if !(isIn(kv.KvS.ShardsGot, key2shard(args.Key)) && isIn(kv.KvS.ShardsAppointed, key2shard(args.Key))) {
+	if !isIn(kv.KvS.ShardsAppointed, key2shard(args.Key)) {
 		reply.Err = ErrWrongGroup
 		fmt.Println("444")
-		fmt.Println(kv.KvS.ShardsGot, "  ", kv.KvS.ShardsAppointed, "   ", key2shard(args.Key))
+		fmt.Println(kv.KvS.ShardsAppointed, "   ", key2shard(args.Key))
 		kv.mu.Unlock()
 		return
 	}
@@ -250,7 +249,9 @@ func StartServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persister,
 	kv.KvS.AppliedIndex = -1
 	kv.AppliedRPC = make(map[int64]int64)
 	kv.AppliedRPC[-1] = -1
-	fmt.Println("What??? From:", kv.me)
+
+	kv.unique = nrand()
+	fmt.Println("Starting From:", kv.me, "  gid:", gid, "  unique:", kv.unique)
 
 	kv.persister = persister
 	//kv.installSnapshot(persister.ReadSnapshot())
@@ -271,8 +272,6 @@ func StartServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persister,
 	}*/
 
 	kv.installSnapshot(persister.ReadSnapshot())
-
-	kv.unique = nrand()
 
 	go kv.applyF()
 	go kv.clearReg()
@@ -371,18 +370,23 @@ func (kv *ShardKV) installSnapshot(snapshot []byte) {
 
 	r := bytes.NewBuffer(snapshot)
 	d := labgob.NewDecoder(r)
+	var unique int64
 	var AppliedRPC map[int64]int64
 	var KvS KvStorage
 	var configs []shardctrler.Config
-	if d.Decode(&AppliedRPC) != nil ||
+	if d.Decode(&unique) != nil ||
+		d.Decode(&AppliedRPC) != nil ||
 		d.Decode(&KvS) != nil ||
 		d.Decode(&configs) != nil {
 		return
 	} else {
 		if KvS.AppliedIndex > kv.KvS.AppliedIndex {
+			kv.unique = unique
 			kv.AppliedRPC = AppliedRPC
 			kv.KvS = KvS
 			kv.configs = configs
+
+			kv.testConsistency("  A")
 		}
 	}
 }
@@ -397,9 +401,14 @@ func (kv *ShardKV) testTrim() {
 		if kv.KvS.AppliedIndex < 0 {
 			log.Panic("What???less then zero???")
 		}
+		kv.testConsistency("  B0")
+		e.Encode(kv.unique)
 		e.Encode(kv.AppliedRPC)
 		e.Encode(kv.KvS)
+		e.Encode(kv.configs)
+		kv.testConsistency("  B1")
 		kv.rf.Snapshot(kv.KvS.AppliedIndex, w.Bytes())
+		kv.testConsistency("  B2")
 	}
 }
 
@@ -473,19 +482,35 @@ func (kv *ShardKV) applyF() {
 		} else {
 			kv.callbackLt.clearF(term)
 		}
+		kv.isInTransfer.Lock()
+		kv.isInTransfer.Unlock()
 		kv.testTrim()
 	}
 }
 
+func deepCopy(old map[int](map[string]string)) map[int](map[string]string) {
+	new := make(map[int](map[string]string))
+	for i1, v1 := range old {
+		new[i1] = make(map[string]string)
+		for i2, v2 := range v1 {
+			new[i1][i2] = v2
+		}
+	}
+
+	return new
+}
+
 func (kv *ShardKV) applyNewConfig(CFG shardctrler.Config) {
 
+	fmt.Println("unique:", kv.unique, "  Enter:", CFG, " on me:", kv.me, " applied:", kv.AppliedRPC, "  unique:", kv.unique)
 	fmt.Println("Print Configuration:", CFG)
 
 	kv.isInTransfer.Lock()
 	if len(kv.configs) == len(kv.KvS.OldS) {
-		kv.KvS.OldS = append(kv.KvS.OldS, kv.KvS.S)
+		kv.KvS.OldS = append(kv.KvS.OldS, deepCopy(kv.KvS.S))
 	} else {
-		log.Panicln("!!!")
+		kv.testConsistency("  F")
+		log.Panicln(len(kv.configs), " != ", len(kv.KvS.OldS), "    unique:", kv.unique)
 	}
 
 	shardsAppointed := []int{}
@@ -521,28 +546,14 @@ func (kv *ShardKV) applyNewConfig(CFG shardctrler.Config) {
 
 	fmt.Println("shardsAppointed:", shardsAppointed, "  shardsNew", shardsNew)
 
-	/*for _, v := range shardsAppointed {
-		if !isIn(kv.KvS.ShardsGot, v) {
-			kv.KvS.S[v] = make(map[string]string)
-			fmt.Println("Creating map:", v, "  on me:", kv.me, "  unique:", kv.unique)
-		}
-	}
-	kv.KvS.ShardsGot = make([]int, len(shardsAppointed))
-	kv.KvS.ShardsAppointed = make([]int, len(shardsAppointed))
-	copy(kv.KvS.ShardsGot, shardsAppointed)
-	copy(kv.KvS.ShardsAppointed, shardsAppointed)*/
-
 	for _, v := range shardsNew {
 		kv.KvS.S[v] = make(map[string]string)
 		fmt.Println("Creating map:", v, "  on me:", kv.me, "  unique:", kv.unique)
 	}
 
-	kv.KvS.ShardsAppointed = append(kv.KvS.ShardsAppointed, shardsNew...) //make([]int, len(shardsAppointed))
-	kv.KvS.ShardsGot = make([]int, len(kv.KvS.ShardsAppointed))
-	copy(kv.KvS.ShardsGot, kv.KvS.ShardsAppointed)
+	kv.KvS.ShardsAppointed = append(kv.KvS.ShardsAppointed, shardsNew...)
 
 	fmt.Println("Setting own:", kv.KvS.ShardsAppointed, "  on me:", kv.me, "  unique:", kv.unique, "  gid:", kv.gid, "  Config:", CFG)
-	//Evil stops here.
 
 	go kv.getNewShards(len(kv.configs), shardsNeedGet, CfgOld, CFG)
 
@@ -550,23 +561,27 @@ func (kv *ShardKV) applyNewConfig(CFG shardctrler.Config) {
 
 func (kv *ShardKV) getNewShards(newIndex int, lt []int, CfgOld shardctrler.Config, CfgNew shardctrler.Config) {
 
+	kv.mu.Lock()
 	//Evil begin.
 	for _, v := range lt {
 		kv.KvS.S[v] = make(map[string]string)
 		fmt.Println("Creating map:", v, "  on me:", kv.me, "  unique:", kv.unique)
 	}
 	kv.KvS.ShardsAppointed = append(kv.KvS.ShardsAppointed, lt...) //make([]int, len(shardsAppointed))
-	kv.KvS.ShardsGot = make([]int, len(kv.KvS.ShardsAppointed))
-	copy(kv.KvS.ShardsGot, kv.KvS.ShardsAppointed)
 	//Evil end.
 
 	//DO SOMETHING HERE. TO BE DONE.
 	kv.isInTransfer.Unlock()
 
-	kv.mu.Lock()
 	kv.configs = append(kv.configs, CfgNew)
+	kv.testConsistency("  C")
+
+	if len(kv.configs) != len(kv.KvS.OldS) {
+		log.Panicln(len(kv.configs), " != ", len(kv.KvS.OldS), "    unique:", kv.unique, "   tag:aaa")
+	}
 	fmt.Println("Need to get:", lt, "  on me:", kv.me, "  unique:", kv.unique, "  gid:", kv.gid, "  Config:", CfgNew)
 	kv.mu.Unlock()
+	fmt.Println("unique:", kv.unique, "  Exit:", CfgNew, " on me:", kv.me, " applied:", kv.AppliedRPC, "  unique:", kv.unique)
 	//fmt.Println("Cfg:")
 
 }
@@ -597,5 +612,13 @@ func (lt *CallBackList) clearF(term int) {
 			v.failFun("")
 			delete(lt.callbackLt, i)
 		}
+	}
+}
+
+func (kv *ShardKV) testConsistency(tag string) {
+	if len(kv.configs) == len(kv.KvS.OldS) {
+		//kv.KvS.OldS = append(kv.KvS.OldS, deepCopy(kv.KvS.S))
+	} else {
+		log.Panicln(len(kv.configs), " != ", len(kv.KvS.OldS), "    unique:", kv.unique, "TAG:", tag)
 	}
 }
