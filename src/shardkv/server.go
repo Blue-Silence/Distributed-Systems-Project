@@ -122,11 +122,14 @@ func (kv *ShardKV) Get(args *GetArgs, reply *GetReply) {
 	////fmt.Println("Before Lock :", args.Id, " on me:", kv.me, "  unique:", kv.unique, "  Lock 1")
 	kv.mu.Lock()
 	////fmt.Println("After Lock :", args.Id, " on me:", kv.me, "  unique:", kv.unique, "  Lock 1")
-	if !isIn(kv.KvS.ShardsAppointed, key2shard(args.Key)) {
-		//if !kv.CheckAvailable(key2shard(args.Key)) {
-		/*if isIn(kv.KvS.ShardsAppointed, key2shard(args.Key)) != kv.CheckAvailable(key2shard(args.Key)) {
-			fmt.Println(isIn(kv.KvS.ShardsAppointed, key2shard(args.Key)), "  !=  ", kv.CheckAvailable(key2shard(args.Key)))
-		}*/
+	//if !isIn(kv.KvS.ShardsAppointed, key2shard(args.Key)) {
+	if !kv.CheckAvailable(key2shard(args.Key)) {
+		if isIn(kv.KvS.ShardsAppointed, key2shard(args.Key)) != kv.CheckAvailable(key2shard(args.Key)) {
+
+			fmt.Println(isIn(kv.KvS.ShardsAppointed, key2shard(args.Key)), "  !=  ", kv.CheckAvailable(key2shard(args.Key)), "   shard:", key2shard(args.Key))
+			fmt.Println("kv.KvS.ShardsAppointed:", kv.KvS.ShardsAppointed, "  gen:", len(kv.configs)-1, "   \nconfig:", kv.configs[len(kv.configs)-1])
+			fmt.Println("Map:", kv.KvS.S)
+		}
 		reply.Err = ErrWrongGroup
 		kv.mu.Unlock()
 		return
@@ -172,10 +175,13 @@ func (kv *ShardKV) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 	////fmt.Println("Before Lock :", args.Id, " on me:", kv.me, "  unique:", kv.unique, "  Lock 3")
 	kv.mu.Lock()
 	////fmt.Println("After Lock :", args.Id, " on me:", kv.me, "  unique:", kv.unique, "  Lock 3")
-	if !isIn(kv.KvS.ShardsAppointed, key2shard(args.Key)) {
-		//if !kv.CheckAvailable(key2shard(args.Key)) {
+	//if !isIn(kv.KvS.ShardsAppointed, key2shard(args.Key)) {
+	if !kv.CheckAvailable(key2shard(args.Key)) {
 		if isIn(kv.KvS.ShardsAppointed, key2shard(args.Key)) != kv.CheckAvailable(key2shard(args.Key)) {
-			fmt.Println(isIn(kv.KvS.ShardsAppointed, key2shard(args.Key)), "  !=  ", kv.CheckAvailable(key2shard(args.Key)))
+
+			fmt.Println(isIn(kv.KvS.ShardsAppointed, key2shard(args.Key)), "  !=  ", kv.CheckAvailable(key2shard(args.Key)), "   shard:", key2shard(args.Key))
+			fmt.Println("kv.KvS.ShardsAppointed:", kv.KvS.ShardsAppointed, "  gen:", len(kv.configs)-1, "   \nconfig:", kv.configs[len(kv.configs)-1])
+			fmt.Println("Map:", kv.KvS.S)
 		}
 		reply.Err = ErrWrongGroup
 		////fmt.Println("444")
@@ -576,6 +582,7 @@ func (kv *ShardKV) applyNewConfig(CFG shardctrler.Config) {
 
 		}
 	}
+	kv.configs = append(kv.configs, CFG)
 
 	////fmt.Println("shardsAppointed:", shardsAppointed, "  shardsNew", shardsNew)
 
@@ -627,7 +634,7 @@ func (kv *ShardKV) getNewShards(newIndex int, lt []int, CfgOld shardctrler.Confi
 	//DO SOMETHING HERE. TO BE DONE.
 	kv.isInTransfer.Unlock()
 
-	kv.configs = append(kv.configs, CfgNew)
+	//kv.configs = append(kv.configs, CfgNew)
 	kv.testConsistency("  C")
 
 	////fmt.Println("Need to get:", lt, "  on me:", kv.me, "  unique:", kv.unique, "  gid:", kv.gid, "  Config:", CfgNew)
@@ -707,7 +714,8 @@ func (kv *ShardKV) GetShard(shard int, CFG shardctrler.Config) ShardState {
 func (kv *ShardKV) GetShardRecv(args *RetriveShardArgs, reply *RetriveShardReply) {
 	kv.mu.Lock()
 	defer kv.mu.Unlock()
-	if shard, ok := kv.KvS.S[ShardID{args.GenNum, args.ShardNum}]; !ok {
+	curGen := len(kv.configs) - 1
+	if shard, ok := kv.KvS.S[ShardID{args.GenNum, args.ShardNum}]; !(ok && curGen > args.GenNum) {
 		reply.Valid = false
 		return
 	} else {
