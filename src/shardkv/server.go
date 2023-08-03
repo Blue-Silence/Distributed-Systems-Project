@@ -320,47 +320,6 @@ func (kv *ShardKV) autoUpdateShards() {
 		fmt.Println("Step S", "  on me:", kv.me, "  unique:", kv.unique)
 		kv.rf.Start(Op{SetConfig, "", "", config, RpcId{-1, int64(config.Num)}, -1})
 		continue
-
-		//fmt.Println("Step S", "  on me:", kv.me, "  unique:", kv.unique)
-		configTail = kv.mck.Query(-1)
-		//fmt.Println("Step S-1", "  on me:", kv.me, "  unique:", kv.unique)
-		for i := len(kv.configs); i <= configTail.Num; i++ {
-			config := kv.mck.Query(i)
-			//fmt.Println("Step S i:", i, "  on me:", kv.me, "  unique:", kv.unique)
-			kv.rf.Start(Op{SetConfig, "", "", config, RpcId{-1, int64(config.Num)}, -1})
-			//fmt.Println("Step S i pass :", i, "  on me:", kv.me, "  unique:", kv.unique)
-		}
-		//if(config.Num)
-		/*fmt.Println("Step A", "  on me:", kv.me, "  unique:", kv.unique)
-		kv.mu.Lock()
-		fmt.Println("Step B", "  on me:", kv.me, "  unique:", kv.unique)
-		//term, _ := kv.rf.GetState()
-		shardsAppointed := []int{}
-
-		//fmt.Println("Shards:", qS)
-		for i, v := range configTail.Shards {
-			if v == kv.gid {
-				shardsAppointed = append(shardsAppointed, i)
-			}
-		}
-
-		//fmt.Println()
-
-		kv.KvS.ShardsAppointed = shardsAppointed
-
-		//The following is evil.Should be corrected later.
-		for _, v := range shardsAppointed {
-			if !isIn(kv.KvS.ShardsGot, v) {
-				kv.KvS.S[v] = make(map[string]string)
-				fmt.Println("Creating map:", v, "  on me:", kv.me, "  unique:", kv.unique)
-			}
-		}
-		kv.KvS.ShardsGot = make([]int, len(shardsAppointed))
-		copy(kv.KvS.ShardsGot, shardsAppointed)
-		fmt.Println("Setting own:", shardsAppointed, "  on me:", kv.me, "  unique:", kv.unique)
-		//Evil stops here.
-
-		kv.mu.Unlock()*/
 	}
 }
 
@@ -620,5 +579,48 @@ func (kv *ShardKV) testConsistency(tag string) {
 		//kv.KvS.OldS = append(kv.KvS.OldS, deepCopy(kv.KvS.S))
 	} else {
 		log.Panicln(len(kv.configs), " != ", len(kv.KvS.OldS), "    unique:", kv.unique, "TAG:", tag)
+	}
+}
+
+func (kv *ShardKV) GetShard(shard int, CFG shardctrler.Config) map[string]string {
+	args := RetriveShardArgs{}
+	args.GenNum = CFG.Num
+	args.GenNum = shard
+
+	//ck.mu.Lock()
+	//defer ck.mu.Unlock()
+
+	//args.Id.ClientId = ck.clienrId
+	//args.Id.RpcSeq = ck.rpcSeq
+	//ck.rpcSeq++
+
+	for {
+		gid := CFG.Shards[shard]
+		if servers, ok := CFG.Groups[gid]; ok {
+			// try each server for the shard.
+			for si := 0; si < len(servers); si++ {
+				srv := kv.make_end(servers[si])
+				var reply RetriveShardReply
+				ok := srv.Call("ShardKV.GetShardRecv", &args, &reply)
+				if ok && reply.Valid {
+					return reply.Shard
+				}
+			}
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+}
+
+func (kv *ShardKV) GetShardRecv(args *RetriveShardArgs, reply *RetriveShardReply) {
+
+	kv.mu.Lock()
+	defer kv.mu.Unlock()
+	if args.GenNum >= len(kv.KvS.OldS) {
+		reply.Valid = false
+		return
+	} else {
+		reply.Shard = kv.KvS.OldS[args.GenNum][args.ShardNum]
+		reply.Valid = true
+		return
 	}
 }

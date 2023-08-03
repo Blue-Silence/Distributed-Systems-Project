@@ -52,3 +52,13 @@ type RpcId struct {
 	ClientId int64
 	RpcSeq   int64
 }
+
+type RetriveShardArgs struct {
+	GenNum   int
+	ShardNum int
+}
+
+type RetriveShardReply struct {
+	Shard map[string]string
+	Valid bool
+}
