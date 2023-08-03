@@ -170,6 +170,9 @@ func (sc *ShardCtrler) Query(args *QueryArgs, reply *QueryReply) {
 		return
 	}
 
+	//fmt.Println("Query start:  -- ", args)
+	//argsD := *args //Debug info
+
 	var finished sync.Mutex
 	finished.Lock()
 
@@ -177,6 +180,7 @@ func (sc *ShardCtrler) Query(args *QueryArgs, reply *QueryReply) {
 		index,
 		func(re Config) {
 			reply.Config = re
+			//fmt.Println("Exec complete:", argsD)
 			finished.Unlock()
 		},
 		func(re Config) {

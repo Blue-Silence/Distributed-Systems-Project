@@ -19,6 +19,7 @@ package raft
 
 import (
 	"bytes"
+	"log"
 	"math/rand"
 	"sync"
 	"sync/atomic"
@@ -228,7 +229,7 @@ func (rf *Raft) Snapshot(index int, snapshot []byte) {
 	defer rf.mu.Unlock()
 	defer rf.persist()
 
-	if index == rf.snapshotTail.OuterIndex {
+	if index <= rf.snapshotTail.OuterIndex {
 		return
 	}
 
@@ -238,6 +239,10 @@ func (rf *Raft) Snapshot(index int, snapshot []byte) {
 			logIndex = i
 			break
 		}
+	}
+
+	if logIndex == -1 {
+		log.Panic("Can't find matching index. Index required:", index, "   logTail:", rf.logs[0], "   snapshotTail:", rf.snapshotTail.OuterIndex)
 	}
 
 	(rf.logOffset) = rf.logs[logIndex].Info.Index + 1

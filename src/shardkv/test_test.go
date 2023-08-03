@@ -25,6 +25,7 @@ func check(t *testing.T, ck *Clerk, key string, value string) {
 
 // test static 2-way sharding, without shard movement.
 func TestStaticShards(t *testing.T) {
+	//return //FOO
 	fmt.Printf("Test: static shards ...\n")
 
 	cfg := make_config(t, 3, false, -1)
@@ -96,6 +97,7 @@ func TestStaticShards(t *testing.T) {
 }
 
 func TestJoinLeave(t *testing.T) {
+	//return //FOO
 	fmt.Printf("Test: join then leave ...\n")
 
 	cfg := make_config(t, 3, false, -1)
@@ -149,6 +151,7 @@ func TestJoinLeave(t *testing.T) {
 }
 
 func TestSnapshot(t *testing.T) {
+	//return //FOO
 	fmt.Printf("Test: snapshots, join, and leave ...\n")
 
 	cfg := make_config(t, 3, false, 1000)
@@ -217,6 +220,7 @@ func TestSnapshot(t *testing.T) {
 }
 
 func TestMissChange(t *testing.T) {
+	//return //FOO
 	fmt.Printf("Test: servers miss configuration changes...\n")
 
 	cfg := make_config(t, 3, false, 1000)
@@ -303,6 +307,7 @@ func TestMissChange(t *testing.T) {
 }
 
 func TestConcurrent1(t *testing.T) {
+	//return //FOO
 	fmt.Printf("Test: concurrent puts and configuration changes...\n")
 
 	cfg := make_config(t, 3, false, 100)
@@ -382,6 +387,7 @@ func TestConcurrent1(t *testing.T) {
 // this tests the various sources from which a re-starting
 // group might need to fetch shard contents.
 func TestConcurrent2(t *testing.T) {
+	//return //FOO
 	fmt.Printf("Test: more concurrent puts and configuration changes...\n")
 
 	cfg := make_config(t, 3, false, -1)
@@ -453,6 +459,7 @@ func TestConcurrent2(t *testing.T) {
 }
 
 func TestConcurrent3(t *testing.T) {
+	//return //FOO
 	fmt.Printf("Test: concurrent configuration change and restart...\n")
 
 	cfg := make_config(t, 3, false, 300)
@@ -521,6 +528,7 @@ func TestConcurrent3(t *testing.T) {
 }
 
 func TestUnreliable1(t *testing.T) {
+	//return //FOO
 	fmt.Printf("Test: unreliable 1...\n")
 
 	cfg := make_config(t, 3, true, 100)
@@ -563,6 +571,7 @@ func TestUnreliable1(t *testing.T) {
 }
 
 func TestUnreliable2(t *testing.T) {
+	//return //FOO
 	fmt.Printf("Test: unreliable 2...\n")
 
 	cfg := make_config(t, 3, true, 100)
@@ -626,6 +635,7 @@ func TestUnreliable2(t *testing.T) {
 }
 
 func TestUnreliable3(t *testing.T) {
+	//return //FOO
 	fmt.Printf("Test: unreliable 3...\n")
 
 	cfg := make_config(t, 3, true, 100)
@@ -733,6 +743,7 @@ func TestUnreliable3(t *testing.T) {
 // optional test to see whether servers are deleting
 // shards for which they are no longer responsible.
 func TestChallenge1Delete(t *testing.T) {
+	//return //FOO
 	fmt.Printf("Test: shard deletion (challenge 1) ...\n")
 
 	// "1" means force snapshot after every log entry.

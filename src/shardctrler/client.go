@@ -45,17 +45,18 @@ func (ck *Clerk) Query(num int) Config {
 	// Your code here.
 	args.Num = num
 	ck.mu.Lock()
+	defer ck.mu.Unlock()
 	args.Id.ClientId = ck.clienrId
 	args.Id.RpcSeq = ck.rpcSeq
 	ck.rpcSeq++
-	ck.mu.Unlock()
+	//ck.mu.Unlock()
 
 	for {
 		// try each known server.
 		for _, srv := range ck.servers {
 			var reply QueryReply
 			ok := srv.Call("ShardCtrler.Query", args, &reply)
-			if ok && reply.WrongLeader == false {
+			if ok && reply.WrongLeader == false && reply.Err == "" {
 				return reply.Config
 			}
 		}
@@ -68,17 +69,18 @@ func (ck *Clerk) Join(servers map[int][]string) {
 	// Your code here.
 	args.Servers = servers
 	ck.mu.Lock()
+	defer ck.mu.Unlock()
 	args.Id.ClientId = ck.clienrId
 	args.Id.RpcSeq = ck.rpcSeq
 	ck.rpcSeq++
-	ck.mu.Unlock()
+	//ck.mu.Unlock()
 
 	for {
 		// try each known server.
 		for _, srv := range ck.servers {
 			var reply JoinReply
 			ok := srv.Call("ShardCtrler.Join", args, &reply)
-			if ok && reply.WrongLeader == false {
+			if ok && reply.WrongLeader == false && reply.Err == "" {
 				return
 			}
 		}
@@ -91,17 +93,18 @@ func (ck *Clerk) Leave(gids []int) {
 	// Your code here.
 	args.GIDs = gids
 	ck.mu.Lock()
+	defer ck.mu.Unlock()
 	args.Id.ClientId = ck.clienrId
 	args.Id.RpcSeq = ck.rpcSeq
 	ck.rpcSeq++
-	ck.mu.Unlock()
+	//ck.mu.Unlock()
 
 	for {
 		// try each known server.
 		for _, srv := range ck.servers {
 			var reply LeaveReply
 			ok := srv.Call("ShardCtrler.Leave", args, &reply)
-			if ok && reply.WrongLeader == false {
+			if ok && reply.WrongLeader == false && reply.Err == "" {
 				return
 			}
 		}
@@ -115,10 +118,11 @@ func (ck *Clerk) Move(shard int, gid int) {
 	args.Shard = shard
 	args.GID = gid
 	ck.mu.Lock()
+	defer ck.mu.Unlock()
 	args.Id.ClientId = ck.clienrId
 	args.Id.RpcSeq = ck.rpcSeq
 	ck.rpcSeq++
-	ck.mu.Unlock()
+	//ck.mu.Unlock()
 
 	for {
 		// try each known server.
