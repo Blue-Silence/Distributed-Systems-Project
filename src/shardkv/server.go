@@ -61,10 +61,10 @@ type ShardKV struct {
 
 type KvStorage struct {
 	//mu              sync.Mutex
-	shardsAppointed []int
-	shardsGot       []int
-	appliedIndex    int
-	s               map[int](map[string]string)
+	ShardsAppointed []int
+	ShardsGot       []int
+	AppliedIndex    int
+	S               map[int](map[string]string)
 }
 
 type CallBackList struct {
@@ -95,7 +95,7 @@ func isIn(lt []int, t int) bool {
 func (kv *ShardKV) Get(args *GetArgs, reply *GetReply) {
 	// Your code here.
 	kv.mu.Lock()
-	if !(isIn(kv.KvS.shardsGot, key2shard(args.Key)) && isIn(kv.KvS.shardsAppointed, key2shard(args.Key))) {
+	if !(isIn(kv.KvS.ShardsGot, key2shard(args.Key)) && isIn(kv.KvS.ShardsAppointed, key2shard(args.Key))) {
 		reply.Err = ErrWrongGroup
 		kv.mu.Unlock()
 		return
@@ -137,10 +137,10 @@ func (kv *ShardKV) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 	// Your code here.
 
 	kv.mu.Lock()
-	if !(isIn(kv.KvS.shardsGot, key2shard(args.Key)) && isIn(kv.KvS.shardsAppointed, key2shard(args.Key))) {
+	if !(isIn(kv.KvS.ShardsGot, key2shard(args.Key)) && isIn(kv.KvS.ShardsAppointed, key2shard(args.Key))) {
 		reply.Err = ErrWrongGroup
 		fmt.Println("444")
-		fmt.Println(kv.KvS.shardsGot, "  ", kv.KvS.shardsAppointed, "   ", key2shard(args.Key))
+		fmt.Println(kv.KvS.ShardsGot, "  ", kv.KvS.ShardsAppointed, "   ", key2shard(args.Key))
 		kv.mu.Unlock()
 		return
 	}
@@ -244,8 +244,8 @@ func StartServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persister,
 
 	// My initialization code here.
 	kv.callbackLt.callbackLt = make(map[ActId]CallBackTuple)
-	kv.KvS.s = make(map[int](map[string]string))
-	kv.KvS.appliedIndex = -1
+	kv.KvS.S = make(map[int](map[string]string))
+	kv.KvS.AppliedIndex = -1
 	kv.AppliedRPC = make(map[int64]int64)
 	kv.AppliedRPC[-1] = -1
 	fmt.Println("What??? From:", kv.me)
@@ -263,9 +263,9 @@ func StartServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persister,
 			shardsAppointed = append(shardsAppointed, i)
 		}
 	}
-	kv.KvS.shardsAppointed = shardsAppointed
+	kv.KvS.ShardsAppointed = shardsAppointed
 	for _, v := range shardsAppointed {
-		kv.KvS.s[v] = make(map[string]string)
+		kv.KvS.S[v] = make(map[string]string)
 	}*/
 
 	kv.installSnapshot(persister.ReadSnapshot())
@@ -345,17 +345,17 @@ func (kv *ShardKV) autoUpdateShards() {
 
 		//fmt.Println()
 
-		kv.KvS.shardsAppointed = shardsAppointed
+		kv.KvS.ShardsAppointed = shardsAppointed
 
 		//The following is evil.Should be corrected later.
 		for _, v := range shardsAppointed {
-			if !isIn(kv.KvS.shardsGot, v) {
-				kv.KvS.s[v] = make(map[string]string)
+			if !isIn(kv.KvS.ShardsGot, v) {
+				kv.KvS.S[v] = make(map[string]string)
 				fmt.Println("Creating map:", v, "  on me:", kv.me, "  unique:", kv.unique)
 			}
 		}
-		kv.KvS.shardsGot = make([]int, len(shardsAppointed))
-		copy(kv.KvS.shardsGot, shardsAppointed)
+		kv.KvS.ShardsGot = make([]int, len(shardsAppointed))
+		copy(kv.KvS.ShardsGot, shardsAppointed)
 		fmt.Println("Setting own:", shardsAppointed, "  on me:", kv.me, "  unique:", kv.unique)
 		//Evil stops here.
 
@@ -370,23 +370,17 @@ func (kv *ShardKV) installSnapshot(snapshot []byte) {
 	r := bytes.NewBuffer(snapshot)
 	d := labgob.NewDecoder(r)
 	var AppliedRPC map[int64]int64
-	var appliedIndex int
-	var shardsAppointed []int
-	var shardsGot []int
-	var s map[int](map[string]string)
+	var KvS KvStorage
+	var configs []shardctrler.Config
 	if d.Decode(&AppliedRPC) != nil ||
-		d.Decode(&appliedIndex) != nil ||
-		d.Decode(&shardsAppointed) != nil ||
-		d.Decode(&shardsGot) != nil ||
-		d.Decode(&s) != nil {
+		d.Decode(&KvS) != nil ||
+		d.Decode(&configs) != nil {
 		return
 	} else {
-		if appliedIndex > kv.KvS.appliedIndex {
+		if KvS.AppliedIndex > kv.KvS.AppliedIndex {
 			kv.AppliedRPC = AppliedRPC
-			kv.KvS.appliedIndex = appliedIndex
-			kv.KvS.shardsAppointed = shardsAppointed
-			kv.KvS.shardsGot = shardsGot
-			kv.KvS.s = s
+			kv.KvS = KvS
+			kv.configs = configs
 		}
 	}
 }
@@ -398,15 +392,12 @@ func (kv *ShardKV) testTrim() {
 		kv.mu.Lock()
 		defer kv.mu.Unlock()
 
-		if kv.KvS.appliedIndex < 0 {
+		if kv.KvS.AppliedIndex < 0 {
 			log.Panic("What???less then zero???")
 		}
 		e.Encode(kv.AppliedRPC)
-		e.Encode(kv.KvS.appliedIndex)
-		e.Encode(kv.KvS.shardsAppointed)
-		e.Encode(kv.KvS.shardsGot)
-		e.Encode(kv.KvS.s)
-		kv.rf.Snapshot(kv.KvS.appliedIndex, w.Bytes())
+		e.Encode(kv.KvS)
+		kv.rf.Snapshot(kv.KvS.AppliedIndex, w.Bytes())
 	}
 }
 
@@ -436,24 +427,24 @@ func (kv *ShardKV) applyF() {
 
 		re := ""
 		kv.mu.Lock()
-		if kv.KvS.appliedIndex+1 != a.CommandIndex && kv.KvS.appliedIndex != -1 {
-			log.Panic(kv.KvS.appliedIndex, "+1 != ", a.CommandIndex, "  me:", kv.me)
+		if kv.KvS.AppliedIndex+1 != a.CommandIndex && kv.KvS.AppliedIndex != -1 {
+			log.Panic(kv.KvS.AppliedIndex, "+1 != ", a.CommandIndex, "  me:", kv.me)
 		}
 		fmt.Println("Completing:", op.Id, "   shard:", key2shard(op.Key), " on me:", kv.me, "  index:", a.CommandIndex, " applied:", kv.AppliedRPC, "  unique:", kv.unique)
-		kv.KvS.appliedIndex = a.CommandIndex
+		kv.KvS.AppliedIndex = a.CommandIndex
 		if op.Id.RpcSeq > kv.AppliedRPC[op.Id.ClientId] {
 			//if true {
 			switch op.Type {
 			case GetF:
-				//re = kv.KvS.s[key2shard(op.Key)][op.Key]
+				//re = kv.KvS.S[key2shard(op.Key)][op.Key]
 				fmt.Println("111")
 			case PutF:
-				kv.KvS.s[key2shard(op.Key)][op.Key] = op.Value
+				kv.KvS.S[key2shard(op.Key)][op.Key] = op.Value
 				//re = op.Value
 				fmt.Println("222")
 			case AppendF:
-				kv.KvS.s[key2shard(op.Key)][op.Key] = kv.KvS.s[key2shard(op.Key)][op.Key] + op.Value
-				//re = kv.KvS.s[key2shard(op.Key)][op.Key]
+				kv.KvS.S[key2shard(op.Key)][op.Key] = kv.KvS.S[key2shard(op.Key)][op.Key] + op.Value
+				//re = kv.KvS.S[key2shard(op.Key)][op.Key]
 				fmt.Println("333")
 			case SetConfig:
 				// Do SOMETHING TOMORROW. TO BE DONE
@@ -468,15 +459,15 @@ func (kv *ShardKV) applyF() {
 				}
 
 				for _, v := range shardsAppointed {
-					if !isIn(kv.KvS.shardsGot, v) {
-						kv.KvS.s[v] = make(map[string]string)
+					if !isIn(kv.KvS.ShardsGot, v) {
+						kv.KvS.S[v] = make(map[string]string)
 						fmt.Println("Creating map:", v, "  on me:", kv.me, "  unique:", kv.unique)
 					}
 				}
-				kv.KvS.shardsGot = make([]int, len(shardsAppointed))
-				kv.KvS.shardsAppointed = make([]int, len(shardsAppointed))
-				copy(kv.KvS.shardsGot, shardsAppointed)
-				copy(kv.KvS.shardsAppointed, shardsAppointed)
+				kv.KvS.ShardsGot = make([]int, len(shardsAppointed))
+				kv.KvS.ShardsAppointed = make([]int, len(shardsAppointed))
+				copy(kv.KvS.ShardsGot, shardsAppointed)
+				copy(kv.KvS.ShardsAppointed, shardsAppointed)
 				fmt.Println("Setting own:", shardsAppointed, "  on me:", kv.me, "  unique:", kv.unique, "  Config:", op.CFG)
 				//Evil stops here.
 				kv.configs = append(kv.configs, op.CFG)
@@ -489,7 +480,7 @@ func (kv *ShardKV) applyF() {
 			//}
 		}
 
-		re = kv.KvS.s[key2shard(op.Key)][op.Key]
+		re = kv.KvS.S[key2shard(op.Key)][op.Key]
 		kv.mu.Unlock()
 
 		term, isLeader := kv.rf.GetState()
