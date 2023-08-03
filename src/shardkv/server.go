@@ -33,6 +33,8 @@ type Op struct {
 	Id RpcId
 
 	Server int
+
+	CfgGen int
 }
 
 type ShardKV struct {
@@ -101,10 +103,11 @@ func (kv *ShardKV) Get(args *GetArgs, reply *GetReply) {
 		kv.mu.Unlock()
 		return
 	}
+	cfgGen := len(kv.configs)
 	kv.mu.Unlock()
 
 	kv.mu.Lock()
-	index, term, isLeader := kv.rf.Start(Op{GetF, args.Key, "", shardctrler.Config{}, args.Id, args.Server})
+	index, term, isLeader := kv.rf.Start(Op{GetF, args.Key, "", shardctrler.Config{}, args.Id, args.Server, cfgGen})
 	kv.mu.Unlock()
 
 	//if
@@ -125,7 +128,7 @@ func (kv *ShardKV) Get(args *GetArgs, reply *GetReply) {
 			finished.Unlock()
 		},
 		func(re string) {
-			reply.Err = Err("Exec fail")
+			reply.Err = ErrWrongLeader //Err("Exec fail")
 			finished.Unlock()
 		},
 	)
@@ -145,6 +148,7 @@ func (kv *ShardKV) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 		kv.mu.Unlock()
 		return
 	}
+	cfgGen := len(kv.configs)
 	kv.mu.Unlock()
 	fmt.Println("777")
 
@@ -153,9 +157,9 @@ func (kv *ShardKV) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 	isLeader := false
 	kv.mu.Lock()
 	if args.Op == "Put" {
-		index, term, isLeader = kv.rf.Start(Op{PutF, args.Key, args.Value, shardctrler.Config{}, args.Id, args.Server})
+		index, term, isLeader = kv.rf.Start(Op{PutF, args.Key, args.Value, shardctrler.Config{}, args.Id, args.Server, cfgGen})
 	} else {
-		index, term, isLeader = kv.rf.Start(Op{AppendF, args.Key, args.Value, shardctrler.Config{}, args.Id, args.Server})
+		index, term, isLeader = kv.rf.Start(Op{AppendF, args.Key, args.Value, shardctrler.Config{}, args.Id, args.Server, cfgGen})
 	}
 
 	kv.mu.Unlock()
@@ -179,7 +183,7 @@ func (kv *ShardKV) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 			finished.Unlock()
 		},
 		func(re string) {
-			reply.Err = Err("Exec fail")
+			reply.Err = ErrWrongLeader //Err("Exec fail")
 			finished.Unlock()
 		},
 	)
@@ -298,7 +302,7 @@ func (kv *ShardKV) autoBeep() {
 func (kv *ShardKV) autoUpdateShards() {
 	for {
 
-		ms := 10
+		ms := 50
 		time.Sleep(time.Duration(ms) * time.Millisecond)
 		//fmt.Println("Step A", "  on me:", kv.me, "  unique:", kv.unique)
 		_, isLeader := kv.rf.GetState()
@@ -310,6 +314,7 @@ func (kv *ShardKV) autoUpdateShards() {
 		kv.mu.Lock()
 		configTail := kv.mck.Query(-1)
 		var config shardctrler.Config
+		cfgGen := len(kv.configs)
 		if len(kv.configs) <= configTail.Num {
 			config = kv.mck.Query(len(kv.configs))
 			kv.mu.Unlock()
@@ -318,7 +323,7 @@ func (kv *ShardKV) autoUpdateShards() {
 			continue
 		}
 		fmt.Println("Step S", "  on me:", kv.me, "  unique:", kv.unique)
-		kv.rf.Start(Op{SetConfig, "", "", config, RpcId{-1, int64(config.Num)}, -1})
+		kv.rf.Start(Op{SetConfig, "", "", config, RpcId{-1, int64(config.Num)}, -1, cfgGen})
 		continue
 	}
 }
@@ -403,8 +408,16 @@ func (kv *ShardKV) applyF() {
 		if kv.KvS.AppliedIndex+1 != a.CommandIndex && kv.KvS.AppliedIndex != -1 {
 			log.Panic(kv.KvS.AppliedIndex, "+1 != ", a.CommandIndex, "  me:", kv.me)
 		}
-		fmt.Println("Completing:", op.Id, "   shard:", key2shard(op.Key), " on me:", kv.me, "  index:", a.CommandIndex, " applied:", kv.AppliedRPC, "  unique:", kv.unique)
+		fmt.Println("Completing:", op.Id, "   shard:", key2shard(op.Key), " on me:", kv.me, "  index:", a.CommandIndex, " applied:", kv.AppliedRPC, "  unique:", kv.unique, "  gid:", kv.gid)
 		kv.KvS.AppliedIndex = a.CommandIndex
+		if op.CfgGen != len(kv.configs) {
+			fmt.Println("Outdated.Skip", op.Id, "   shard:", key2shard(op.Key), " on me:", kv.me, "  index:", a.CommandIndex, " applied:", kv.AppliedRPC, "  unique:", kv.unique, "  gid:", kv.gid)
+			term, _ := kv.rf.GetState()
+			_, fail := kv.callbackLt.popF(term, a.CommandIndex)
+			fail("")
+			kv.mu.Unlock()
+			continue
+		}
 		if op.Id.RpcSeq > kv.AppliedRPC[op.Id.ClientId] {
 			//if true {
 			switch op.Type {
@@ -520,12 +533,27 @@ func (kv *ShardKV) applyNewConfig(CFG shardctrler.Config) {
 
 func (kv *ShardKV) getNewShards(newIndex int, lt []int, CfgOld shardctrler.Config, CfgNew shardctrler.Config) {
 
-	kv.mu.Lock()
+	//kv.mu.Lock()
 	//Evil begin.
-	for _, v := range lt {
+	/*for _, v := range lt {
 		kv.KvS.S[v] = make(map[string]string)
 		fmt.Println("Creating map:", v, "  on me:", kv.me, "  unique:", kv.unique)
+	}*/
+	for _, v := range lt {
+		func(shard int, cfg shardctrler.Config) {
+			t := kv.GetShard(shard, cfg)
+			fmt.Println(t)
+			if nil == t {
+				log.Panicln("What? nil?")
+			}
+			kv.mu.Lock()
+			kv.KvS.S[shard] = t
+
+			kv.mu.Unlock()
+		}(v, CfgOld)
 	}
+
+	kv.mu.Lock()
 	kv.KvS.ShardsAppointed = append(kv.KvS.ShardsAppointed, lt...) //make([]int, len(shardsAppointed))
 	//Evil end.
 
@@ -585,7 +613,7 @@ func (kv *ShardKV) testConsistency(tag string) {
 func (kv *ShardKV) GetShard(shard int, CFG shardctrler.Config) map[string]string {
 	args := RetriveShardArgs{}
 	args.GenNum = CFG.Num
-	args.GenNum = shard
+	args.ShardNum = shard
 
 	//ck.mu.Lock()
 	//defer ck.mu.Unlock()
@@ -603,6 +631,7 @@ func (kv *ShardKV) GetShard(shard int, CFG shardctrler.Config) map[string]string
 				var reply RetriveShardReply
 				ok := srv.Call("ShardKV.GetShardRecv", &args, &reply)
 				if ok && reply.Valid {
+					fmt.Println("Getting:", args, "  on me:", kv.me, "  unique:", kv.unique, "  gid:", kv.gid)
 					return reply.Shard
 				}
 			}
@@ -615,11 +644,16 @@ func (kv *ShardKV) GetShardRecv(args *RetriveShardArgs, reply *RetriveShardReply
 
 	kv.mu.Lock()
 	defer kv.mu.Unlock()
-	if args.GenNum >= len(kv.KvS.OldS) {
+	if args.GenNum+1 >= len(kv.KvS.OldS) {
+		fmt.Println("Not having:", args, "  on me:", kv.me, "  unique:", kv.unique, "  gid:", kv.gid)
 		reply.Valid = false
 		return
 	} else {
-		reply.Shard = kv.KvS.OldS[args.GenNum][args.ShardNum]
+		reply.Shard = kv.KvS.OldS[args.GenNum+1][args.ShardNum]
+		fmt.Println("Sending:", args, "  on me:", kv.me, "  unique:", kv.unique, "  gid:", kv.gid)
+		if reply.Shard == nil {
+			log.Panicln("I'm sending nil???:", kv.KvS.OldS[args.GenNum])
+		}
 		reply.Valid = true
 		return
 	}
