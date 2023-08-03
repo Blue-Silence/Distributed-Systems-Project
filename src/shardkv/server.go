@@ -2,6 +2,7 @@ package shardkv
 
 import (
 	"bytes"
+	"fmt"
 	"log"
 	"sync"
 	"time"
@@ -121,8 +122,11 @@ func (kv *ShardKV) Get(args *GetArgs, reply *GetReply) {
 	////fmt.Println("Before Lock :", args.Id, " on me:", kv.me, "  unique:", kv.unique, "  Lock 1")
 	kv.mu.Lock()
 	////fmt.Println("After Lock :", args.Id, " on me:", kv.me, "  unique:", kv.unique, "  Lock 1")
-	//if !isIn(kv.KvS.ShardsAppointed, key2shard(args.Key)) {
-	if !kv.CheckAvailable(key2shard(args.Key)) {
+	if !isIn(kv.KvS.ShardsAppointed, key2shard(args.Key)) {
+		//if !kv.CheckAvailable(key2shard(args.Key)) {
+		/*if isIn(kv.KvS.ShardsAppointed, key2shard(args.Key)) != kv.CheckAvailable(key2shard(args.Key)) {
+			fmt.Println(isIn(kv.KvS.ShardsAppointed, key2shard(args.Key)), "  !=  ", kv.CheckAvailable(key2shard(args.Key)))
+		}*/
 		reply.Err = ErrWrongGroup
 		kv.mu.Unlock()
 		return
@@ -168,8 +172,11 @@ func (kv *ShardKV) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 	////fmt.Println("Before Lock :", args.Id, " on me:", kv.me, "  unique:", kv.unique, "  Lock 3")
 	kv.mu.Lock()
 	////fmt.Println("After Lock :", args.Id, " on me:", kv.me, "  unique:", kv.unique, "  Lock 3")
-	//if !isIn(kv.KvS.ShardsAppointed, key2shard(args.Key)) {
-	if !kv.CheckAvailable(key2shard(args.Key)) {
+	if !isIn(kv.KvS.ShardsAppointed, key2shard(args.Key)) {
+		//if !kv.CheckAvailable(key2shard(args.Key)) {
+		if isIn(kv.KvS.ShardsAppointed, key2shard(args.Key)) != kv.CheckAvailable(key2shard(args.Key)) {
+			fmt.Println(isIn(kv.KvS.ShardsAppointed, key2shard(args.Key)), "  !=  ", kv.CheckAvailable(key2shard(args.Key)))
+		}
 		reply.Err = ErrWrongGroup
 		////fmt.Println("444")
 		////fmt.Println(kv.KvS.ShardsAppointed, "   ", key2shard(args.Key))
@@ -711,8 +718,8 @@ func (kv *ShardKV) GetShardRecv(args *RetriveShardArgs, reply *RetriveShardReply
 }
 
 func (kv *ShardKV) CheckAvailable(shard int) bool {
-	kv.mu.Lock()
-	defer kv.mu.Unlock()
+	//kv.mu.Lock()
+	//defer kv.mu.Unlock()
 	curGen := len(kv.configs) - 1
 	_, ok := kv.KvS.S[ShardID{curGen, shard}]
 	return ok
