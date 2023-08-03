@@ -59,6 +59,6 @@ type RetriveShardArgs struct {
 }
 
 type RetriveShardReply struct {
-	Shard map[string]string
+	Shard ShardState
 	Valid bool
 }
