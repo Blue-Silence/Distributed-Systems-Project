@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"log"
+	"runtime/debug"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -307,6 +308,7 @@ func (kv *KVServer) applyF() {
 			}
 
 			if op.Id.RpcSeq != (kv.AppliedRPC[op.Id.ClientId] + 1) {
+				debug.Stack()
 				log.Fatal(op.Id.RpcSeq, " != ", kv.AppliedRPC[op.Id.ClientId], "+1")
 			}
 			kv.AppliedRPC[op.Id.ClientId] = op.Id.RpcSeq

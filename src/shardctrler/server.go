@@ -3,6 +3,7 @@ package shardctrler
 import (
 	"fmt"
 	"log"
+	"runtime/debug"
 	"sort"
 	"sync"
 	"time"
@@ -319,6 +320,7 @@ func (sc *ShardCtrler) applyF() {
 			}
 
 			if op.Id.RpcSeq != (sc.AppliedRPC[op.Id.ClientId] + 1) {
+				debug.PrintStack()
 				log.Fatal(op.Id.RpcSeq, " != ", sc.AppliedRPC[op.Id.ClientId], "+1")
 			}
 			sc.AppliedRPC[op.Id.ClientId] = op.Id.RpcSeq
