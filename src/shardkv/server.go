@@ -15,6 +15,7 @@ import (
 )
 
 const (
+	AddShard  = -1
 	SetConfig = 0
 	PutF      = 1
 	GetF      = 2
@@ -36,6 +37,9 @@ type Op struct {
 	Server int
 
 	CfgGen int
+
+	SID   ShardID
+	Shard ShardState
 }
 
 type ShardKV struct {
@@ -78,6 +82,7 @@ type KvStorage struct {
 	*/
 	CurrentConfig int64
 	ToBePoll      IntSet
+	ShardGen      map[int]int64
 }
 
 type ShardState struct {
@@ -145,7 +150,7 @@ func (kv *ShardKV) Get(args *GetArgs, reply *GetReply) {
 	////fmt.Println("Before Lock :", args.Id, " on me:", kv.me, "  unique:", kv.unique, "  Lock 2")
 	kv.mu.Lock()
 	////fmt.Println("After Lock :", args.Id, " on me:", kv.me, "  unique:", kv.unique, "  Lock 2")
-	index, term, isLeader := kv.rf.Start(Op{GetF, args.Key, "", shardctrler.Config{}, args.Id, args.Server, cfgGen})
+	index, term, isLeader := kv.rf.Start(Op{GetF, args.Key, "", shardctrler.Config{}, args.Id, args.Server, cfgGen, ShardID{}, newShardState()})
 	kv.mu.Unlock()
 
 	//if
@@ -205,9 +210,9 @@ func (kv *ShardKV) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 	kv.mu.Lock()
 	////fmt.Println("After Lock :", args.Id, " on me:", kv.me, "  unique:", kv.unique, "  Lock 4")
 	if args.Op == "Put" {
-		index, term, isLeader = kv.rf.Start(Op{PutF, args.Key, args.Value, shardctrler.Config{}, args.Id, args.Server, cfgGen})
+		index, term, isLeader = kv.rf.Start(Op{PutF, args.Key, args.Value, shardctrler.Config{}, args.Id, args.Server, cfgGen, ShardID{}, newShardState()})
 	} else {
-		index, term, isLeader = kv.rf.Start(Op{AppendF, args.Key, args.Value, shardctrler.Config{}, args.Id, args.Server, cfgGen})
+		index, term, isLeader = kv.rf.Start(Op{AppendF, args.Key, args.Value, shardctrler.Config{}, args.Id, args.Server, cfgGen, ShardID{}, newShardState()})
 	}
 
 	kv.mu.Unlock()
@@ -301,6 +306,7 @@ func StartServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persister,
 	kv.KvS.AppliedIndex = -1
 	kv.KvS.CurrentConfig = -1
 	kv.KvS.ToBePoll = make(IntSet)
+	kv.KvS.ShardGen = make(map[int]int64)
 
 	kv.unique = nrand()
 	////fmt.Println("Starting From:", kv.me, "  gid:", gid, "  unique:", kv.unique)
@@ -373,7 +379,7 @@ func (kv *ShardKV) autoUpdateShards() {
 			continue
 		}
 		////fmt.Println("Step S", "  on me:", kv.me, "  unique:", kv.unique)
-		kv.rf.Start(Op{SetConfig, "", "", config, RpcId{-1, int64(config.Num)}, -1, cfgGen})
+		kv.rf.Start(Op{SetConfig, "", "", config, RpcId{-1, int64(config.Num)}, -1, cfgGen, ShardID{}, newShardState()})
 		continue
 	}
 }
@@ -475,36 +481,41 @@ func (kv *ShardKV) applyF() {
 			continue
 		}
 		curGen := len(kv.configs) - 1
-		if (op.Type != SetConfig && op.Id.RpcSeq > kv.KvS.S[ShardID{curGen, key2shard(op.Key)}].AppliedRPC[op.Id.ClientId]) || (op.Type == SetConfig && op.Id.RpcSeq > int64(kv.KvS.CurrentConfig)) {
+		if ((op.Type == GetF || op.Type == PutF || op.Type == AppendF) && op.Id.RpcSeq > kv.KvS.S[ShardID{curGen, key2shard(op.Key)}].AppliedRPC[op.Id.ClientId]) ||
+			(op.Type == SetConfig && op.Id.RpcSeq > int64(kv.KvS.CurrentConfig)) ||
+			(op.Type == AddShard && kv.KvS.ShardGen[op.SID.ShardNum] < int64(op.SID.Gen)) {
 			//if true {
 			switch op.Type {
 			case GetF:
 				//fmt.Println("GET -- Key:", op.Key, "  Value:", kv.KvS.S[key2shard(op.Key)].S[op.Key])
 				//re = kv.KvS.S[key2shard(op.Key)][op.Key]
 				////fmt.Println("111")
+				kv.KvS.S[ShardID{curGen, key2shard(op.Key)}].AppliedRPC[op.Id.ClientId] = op.Id.RpcSeq
 			case PutF:
 				//fmt.Println("PUT -- Key:", op.Key, "  Value(Old):", kv.KvS.S[key2shard(op.Key)].S[op.Key], "  Value(New):", op.Value)
 				kv.KvS.S[ShardID{curGen, key2shard(op.Key)}].S[op.Key] = op.Value
-
-				//re = op.Value
-				////fmt.Println("222")
+				kv.KvS.S[ShardID{curGen, key2shard(op.Key)}].AppliedRPC[op.Id.ClientId] = op.Id.RpcSeq
 			case AppendF:
 				//fmt.Println("APPEND -- Key:", op.Key, "  Value(Old):", kv.KvS.S[key2shard(op.Key)].S[op.Key], "  APPENDING:", op.Value, "  Value(New):", kv.KvS.S[key2shard(op.Key)].S[op.Key]+op.Value)
 				kv.KvS.S[ShardID{curGen, key2shard(op.Key)}].S[op.Key] = kv.KvS.S[ShardID{curGen, key2shard(op.Key)}].S[op.Key] + op.Value
+				kv.KvS.S[ShardID{curGen, key2shard(op.Key)}].AppliedRPC[op.Id.ClientId] = op.Id.RpcSeq
 				//re = kv.KvS.S[key2shard(op.Key)][op.Key]
 				////fmt.Println("333")
 			case SetConfig:
 				// Do SOMETHING TOMORROW. TO BE DONE
 				kv.applyNewConfig(op.CFG)
-
+				kv.KvS.CurrentConfig = op.Id.RpcSeq
+			case AddShard:
+				kv.KvS.S[op.SID] = op.Shard
+				kv.KvS.ShardGen[op.SID.ShardNum] = int64(op.SID.Gen)
 			}
 
 			//log.Println("From:", op.Id.ClientId, "  to:", kv.me)
-			if op.Type != SetConfig {
+			/*if op.Type != SetConfig {
 				kv.KvS.S[ShardID{curGen, key2shard(op.Key)}].AppliedRPC[op.Id.ClientId] = op.Id.RpcSeq
 			} else {
 				kv.KvS.CurrentConfig = op.Id.RpcSeq
-			}
+			}*/
 
 			//}
 		}
