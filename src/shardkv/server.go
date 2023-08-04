@@ -399,7 +399,9 @@ func (kv *ShardKV) installSnapshot(snapshot []byte) {
 			kv.KvS = KvS
 			kv.configs = configs
 
-			kv.testConsistency("  A")
+			for i, _ := range kv.KvS.ToBePoll {
+				kv.PollShard(i)
+			}
 		}
 	}
 }
