@@ -816,7 +816,7 @@ func (kv *ShardKV) calcOwner() map[ShardID]int {
 
 func (kv *ShardKV) autoGC() {
 	for {
-		ms := 30
+		ms := 50
 		time.Sleep(time.Duration(ms) * time.Millisecond)
 		go kv.GC()
 	}
