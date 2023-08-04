@@ -352,19 +352,27 @@ func (kv *ShardKV) installSnapshot(snapshot []byte) {
 
 func (kv *ShardKV) testTrim() {
 	if kv.persister.RaftStateSize() > kv.maxraftstate && kv.maxraftstate != -1 {
-		w := new(bytes.Buffer)
-		e := labgob.NewEncoder(w)
 		kv.mu.Lock()
 		defer kv.mu.Unlock()
+		kv.takeSnapshot()
 
-		if kv.KvS.AppliedIndex < 0 {
-			log.Panic("What???less then zero???")
-		}
-		e.Encode(kv.unique)
-		e.Encode(kv.KvS)
-		e.Encode(kv.configs)
-		kv.rf.Snapshot(kv.KvS.AppliedIndex, w.Bytes())
 	}
+}
+
+func (kv *ShardKV) takeSnapshot() {
+	if kv.maxraftstate == -1 {
+		return
+	}
+	if kv.KvS.AppliedIndex < 0 {
+		log.Panic("What???less then zero???")
+	}
+	w := new(bytes.Buffer)
+	e := labgob.NewEncoder(w)
+	e.Encode(kv.unique)
+	e.Encode(kv.KvS)
+	e.Encode(kv.configs)
+	kv.rf.Snapshot(kv.KvS.AppliedIndex, w.Bytes())
+
 }
 
 func (kv *ShardKV) clearReg() {
@@ -744,10 +752,12 @@ func (kv *ShardKV) GC() {
 			if ownerGen, isAlive := kv.CheckOwner(owner, id.ShardNum, allServer); ownerGen > id.Gen || !isAlive || (ownerGen == id.Gen && owner != kv.gid) {
 				kv.mu.Lock()
 				delete(kv.KvS.S, id)
+				kv.takeSnapshot()
 				kv.mu.Unlock()
 			}
 		}(id, owner)
 	}
+
 }
 
 func (kv *ShardKV) CheckOwner(ownerGid int, shard int, allServer map[int][]string) (int, bool) {

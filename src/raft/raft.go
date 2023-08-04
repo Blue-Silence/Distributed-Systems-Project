@@ -229,6 +229,11 @@ func (rf *Raft) Snapshot(index int, snapshot []byte) {
 	defer rf.mu.Unlock()
 	defer rf.persist()
 
+	if index == rf.snapshotTail.OuterIndex {
+		rf.snapshot = snapshot
+		return
+	}
+
 	if index <= rf.snapshotTail.OuterIndex {
 		return
 	}
