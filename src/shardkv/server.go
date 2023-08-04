@@ -62,6 +62,9 @@ type ShardKV struct {
 	unique int64
 }
 
+type mem struct{}
+type IntSet map[int]mem
+
 type KvStorage struct {
 	//mu              sync.Mutex
 	ShardsAppointed []int
@@ -73,6 +76,7 @@ type KvStorage struct {
 		OldS            [](map[int](map[string]string))
 	*/
 	CurrentConfig int64
+	ToBePoll      IntSet
 }
 
 type ShardState struct {
@@ -295,6 +299,7 @@ func StartServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persister,
 	kv.KvS.S = make(map[ShardID]ShardState)
 	kv.KvS.AppliedIndex = -1
 	kv.KvS.CurrentConfig = -1
+	kv.KvS.ToBePoll = make(IntSet)
 
 	kv.unique = nrand()
 	////fmt.Println("Starting From:", kv.me, "  gid:", gid, "  unique:", kv.unique)
@@ -570,7 +575,8 @@ func (kv *ShardKV) applyNewConfig(CFG shardctrler.Config) {
 		copy(shardsNew, shardsAppointed)
 	} else {
 		CfgOld = kv.configs[len(kv.configs)-1]
-		for _, shard := range shardsAppointed {
+		_, _, shardsHave, shardsNeedGet, shardsNew = calcDiff(CfgOld, CFG, kv.gid)
+		/*for _, shard := range shardsAppointed {
 			switch {
 			case CfgOld.Shards[shard] == 0:
 				shardsNew = append(shardsNew, shard)
@@ -580,7 +586,7 @@ func (kv *ShardKV) applyNewConfig(CFG shardctrler.Config) {
 				shardsNeedGet = append(shardsNeedGet, shard)
 			}
 
-		}
+		}*/
 	}
 	kv.configs = append(kv.configs, CFG)
 
@@ -731,4 +737,57 @@ func (kv *ShardKV) CheckAvailable(shard int) bool {
 	curGen := len(kv.configs) - 1
 	_, ok := kv.KvS.S[ShardID{curGen, shard}]
 	return ok
+}
+
+func (kv *ShardKV) PollShard(shard int) {
+	/*shardsDeleted := []int{}
+	shardsMoved := []int{}
+	shardsStay := []int{}
+	shardsGet := []int{}
+	shardsNew := []int{}
+
+	var*/
+}
+
+func calcDiff(old, new shardctrler.Config, self int) ([]int, []int, []int, []int, []int) {
+	shardsDeleted := []int{}
+	shardsMoved := []int{}
+	shardsStay := []int{}
+	shardsGet := []int{}
+	shardsNew := []int{}
+
+	maxL := func(a, b int) int {
+		if a > b {
+			return a
+		} else {
+			return b
+		}
+	}(len(old.Shards), len(new.Shards))
+
+	for i := 0; i < maxL; i++ {
+		switch {
+		case i >= len(old.Shards):
+			shardsNew = append(shardsNew, i)
+		case i >= len(new.Shards):
+			shardsDeleted = append(shardsDeleted, i)
+		case new.Shards[i] == self:
+			switch {
+			case old.Shards[i] == self:
+				shardsStay = append(shardsStay, i)
+			case old.Shards[i] == 0:
+				shardsNew = append(shardsNew, i)
+			default:
+				shardsGet = append(shardsGet, i)
+			}
+		case old.Shards[i] == self:
+			switch {
+			case new.Shards[i] == 0:
+				shardsDeleted = append(shardsDeleted, i)
+			default:
+				shardsMoved = append(shardsMoved, i)
+			}
+		}
+	}
+
+	return shardsDeleted, shardsMoved, shardsStay, shardsGet, shardsNew
 }
