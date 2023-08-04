@@ -62,3 +62,11 @@ type RetriveShardReply struct {
 	Shard ShardState
 	Valid bool
 }
+
+type CheckOwnerArgs struct {
+	ShardNum int
+}
+
+type CheckOwnerReply struct {
+	GenNum int
+}
