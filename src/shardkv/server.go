@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"6.5840/labgob"
@@ -128,12 +129,12 @@ func (kv *ShardKV) Get(args *GetArgs, reply *GetReply) {
 	////fmt.Println("After Lock :", args.Id, " on me:", kv.me, "  unique:", kv.unique, "  Lock 1")
 	//if !isIn(kv.KvS.ShardsAppointed, key2shard(args.Key)) {
 	if !kv.CheckAvailable(key2shard(args.Key)) {
-		if isIn(kv.KvS.ShardsAppointed, key2shard(args.Key)) != kv.CheckAvailable(key2shard(args.Key)) {
+		/*if isIn(kv.KvS.ShardsAppointed, key2shard(args.Key)) != kv.CheckAvailable(key2shard(args.Key)) {
 
 			fmt.Println(isIn(kv.KvS.ShardsAppointed, key2shard(args.Key)), "  !=  ", kv.CheckAvailable(key2shard(args.Key)), "   shard:", key2shard(args.Key))
 			fmt.Println("kv.KvS.ShardsAppointed:", kv.KvS.ShardsAppointed, "  gen:", len(kv.configs)-1, "   \nconfig:", kv.configs[len(kv.configs)-1])
 			fmt.Println("Map:", kv.KvS.S)
-		}
+		}*/
 		reply.Err = ErrWrongGroup
 		kv.mu.Unlock()
 		return
@@ -181,14 +182,14 @@ func (kv *ShardKV) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 	////fmt.Println("After Lock :", args.Id, " on me:", kv.me, "  unique:", kv.unique, "  Lock 3")
 	//if !isIn(kv.KvS.ShardsAppointed, key2shard(args.Key)) {
 	if !kv.CheckAvailable(key2shard(args.Key)) {
-		if isIn(kv.KvS.ShardsAppointed, key2shard(args.Key)) != kv.CheckAvailable(key2shard(args.Key)) {
+		/*if isIn(kv.KvS.ShardsAppointed, key2shard(args.Key)) != kv.CheckAvailable(key2shard(args.Key)) {
 
 			fmt.Println(isIn(kv.KvS.ShardsAppointed, key2shard(args.Key)), "  !=  ", kv.CheckAvailable(key2shard(args.Key)), "   shard:", key2shard(args.Key))
 			fmt.Println("kv.KvS.ShardsAppointed:", kv.KvS.ShardsAppointed, "  gen:", len(kv.configs)-1, "   \nconfig:", kv.configs[len(kv.configs)-1])
 			fmt.Println("Map:", kv.KvS.S)
-		}
+		}*/
 		reply.Err = ErrWrongGroup
-		////fmt.Println("444")
+		//fmt.Println("444")
 		////fmt.Println(kv.KvS.ShardsAppointed, "   ", key2shard(args.Key))
 		kv.mu.Unlock()
 		return
@@ -342,7 +343,7 @@ func (kv *ShardKV) autoBeep() {
 		time.Sleep(time.Duration(ms) * time.Millisecond)
 
 		kv.isInTransfer.Lock()
-		////fmt.Println("Beep", "  on me:", kv.me, "  unique:", kv.unique)
+		fmt.Println("Beep", "  on me:", kv.me, "  unique:", kv.unique, "  gid:", kv.gid)
 		kv.isInTransfer.Unlock()
 		//kv.mu.Unlock()
 	}
@@ -592,62 +593,55 @@ func (kv *ShardKV) applyNewConfig(CFG shardctrler.Config) {
 
 	////fmt.Println("shardsAppointed:", shardsAppointed, "  shardsNew", shardsNew)
 
-	for _, v := range shardsNew {
+	/*for _, v := range shardsNew {
 		kv.KvS.S[ShardID{CFG.Num, v}] = newShardState()
-		////fmt.Println("Creating map:", v, "  on me:", kv.me, "  unique:", kv.unique)
 	}
 
 	for _, v := range shardsHave {
 		kv.KvS.S[ShardID{CFG.Num, v}] = kv.KvS.S[ShardID{CfgOld.Num, v}]
-		////fmt.Println("Creating map:", v, "  on me:", kv.me, "  unique:", kv.unique)
-	}
+	}*/
 
 	//kv.KvS.ShardsAppointed = append(kv.KvS.ShardsAppointed, shardsNew...)
 	kv.KvS.ShardsAppointed = append(shardsHave, shardsNew...)
 
 	////fmt.Println("Setting own:", kv.KvS.ShardsAppointed, "  on me:", kv.me, "  unique:", kv.unique, "  gid:", kv.gid, "  Config:", CFG)
 
+	kv.KvS.ToBePoll[CFG.Num] = mem{}
+
 	go kv.getNewShards(len(kv.configs), shardsNeedGet, CfgOld, CFG)
 
 }
 
 func (kv *ShardKV) getNewShards(newIndex int, lt []int, CfgOld shardctrler.Config, CfgNew shardctrler.Config) {
+	/*
+		for _, v := range lt {
+			func(shard int, cfg shardctrler.Config) {
+				t := kv.GetShard(shard, cfg)
+				kv.mu.Lock()
+				kv.KvS.S[ShardID{CfgOld.Num + 1, shard}] = t
+				kv.mu.Unlock()
+			}(v, CfgOld)
+		}
+		kv.mu.Lock()
+		kv.KvS.ShardsAppointed = append(kv.KvS.ShardsAppointed, lt...) //make([]int, len(shardsAppointed))
+		kv.isInTransfer.Unlock()
+		kv.mu.Unlock()
+	*/
 
-	//kv.mu.Lock()
-	//Evil begin.
-	/*for _, v := range lt {
-		kv.KvS.S[v] = make(map[string]string)
-		////fmt.Println("Creating map:", v, "  on me:", kv.me, "  unique:", kv.unique)
-	}*/
-	for _, v := range lt {
-		func(shard int, cfg shardctrler.Config) {
-			t := kv.GetShard(shard, cfg)
-			////fmt.Println(t)
-			////fmt.Println("Before Lock :", " on me:", kv.me, "  unique:", kv.unique, "  Lock 11")
-			kv.mu.Lock()
-			kv.KvS.S[ShardID{CfgOld.Num + 1, shard}] = t
-			////fmt.Println("After Lock :", " on me:", kv.me, "  unique:", kv.unique, "  Lock 11")
-
+	kv.PollShard(CfgNew.Num)
+	for {
+		time.Sleep(100 * time.Millisecond)
+		//fmt.Println("Not Finish!", " on me:", kv.me, "  unique:", kv.unique, "  gid:", kv.gid, "  Config:", CfgNew)
+		kv.mu.Lock()
+		if _, ok := kv.KvS.ToBePoll[CfgNew.Num]; !ok {
+			//fmt.Println("Finish!", " on me:", kv.me, "  unique:", kv.unique, "  gid:", kv.gid, "  Config:", CfgNew, "\nMap:", kv.KvS.S)
 			kv.mu.Unlock()
-		}(v, CfgOld)
+			break
+		}
+		kv.mu.Unlock()
 	}
-	////fmt.Println("Before Lock :", " on me:", kv.me, "  unique:", kv.unique, "  Lock 12")
-	kv.mu.Lock()
-	////fmt.Println("After Lock :", " on me:", kv.me, "  unique:", kv.unique, "  Lock 12")
-	kv.KvS.ShardsAppointed = append(kv.KvS.ShardsAppointed, lt...) //make([]int, len(shardsAppointed))
-	//Evil end.
 
-	//DO SOMETHING HERE. TO BE DONE.
 	kv.isInTransfer.Unlock()
-
-	//kv.configs = append(kv.configs, CfgNew)
-	kv.testConsistency("  C")
-
-	////fmt.Println("Need to get:", lt, "  on me:", kv.me, "  unique:", kv.unique, "  gid:", kv.gid, "  Config:", CfgNew)
-	kv.mu.Unlock()
-	////fmt.Println("unique:", kv.unique, "  Exit:", CfgNew, " on me:", kv.me, " applied:", kv.AppliedRPC, "  unique:", kv.unique)
-	//////fmt.Println("Cfg:")
-
 }
 
 func (lt *CallBackList) reg(term int, index int, succeed func(string), fail func(string)) {
@@ -739,14 +733,100 @@ func (kv *ShardKV) CheckAvailable(shard int) bool {
 	return ok
 }
 
-func (kv *ShardKV) PollShard(shard int) {
-	/*shardsDeleted := []int{}
-	shardsMoved := []int{}
-	shardsStay := []int{}
-	shardsGet := []int{}
-	shardsNew := []int{}
+func (kv *ShardKV) PollShard(gen int) {
+	var old shardctrler.Config
+	var new shardctrler.Config
+	oldGen := gen - 1
 
-	var*/
+	kv.mu.Lock()
+	gid := kv.gid
+	if gen != 0 {
+		old = kv.configs[gen-1]
+	}
+	new = kv.configs[gen]
+	kv.mu.Unlock()
+
+	shardsDeleted, shardsMoved, shardsStay, shardsGet, shardsNew := calcDiff(old, new, gid)
+
+	func(a []int) {}(shardsMoved)
+
+	kv.mu.Lock()
+	for _, s := range shardsDeleted {
+		if _, ok := kv.KvS.S[ShardID{oldGen, s}]; ok {
+			//fmt.Println("Deleting shard:", ShardID{oldGen, s}, "  on me:", kv.me, "  unique:", kv.unique, "  gid:", kv.gid)
+			delete(kv.KvS.S, ShardID{oldGen, s})
+		}
+	}
+
+	for _, s := range shardsNew {
+		if _, ok := kv.KvS.S[ShardID{gen, s}]; !ok {
+			kv.KvS.S[ShardID{gen, s}] = newShardState()
+		}
+	}
+	kv.mu.Unlock()
+
+	var threadCount int64 = 0
+
+	for _, s := range shardsStay {
+		atomic.AddInt64(&threadCount, 1)
+		go func(s int) {
+			//fmt.Println("Start to get Get shard:", s, "  shardstay:", shardsStay, "on me:", kv.me, "  unique:", kv.unique, "  gid:", kv.gid)
+			for {
+				time.Sleep(100 * time.Millisecond)
+				//fmt.Println("Getting shard:", s, "  shardstay:", shardsStay, "on me:", kv.me, "  unique:", kv.unique, "  gid:", kv.gid)
+				kv.mu.Lock()
+				if _, ok := kv.KvS.S[ShardID{oldGen, s}]; ok {
+					kv.KvS.S[ShardID{gen, s}] = kv.KvS.S[ShardID{oldGen, s}]
+					delete(kv.KvS.S, ShardID{oldGen, s})
+					kv.mu.Unlock()
+					atomic.AddInt64(&threadCount, -1)
+					//fmt.Println("Got shard:", s, "  on me:", kv.me, "  unique:", kv.unique, "  gid:", kv.gid)
+					break
+				}
+				if _, ok := kv.KvS.S[ShardID{gen, s}]; ok {
+					kv.mu.Unlock()
+					atomic.AddInt64(&threadCount, -1)
+					break
+				}
+				kv.mu.Unlock()
+			}
+		}(s)
+	}
+
+	for _, s := range shardsGet {
+		atomic.AddInt64(&threadCount, 1)
+		go func(s int) {
+			for {
+				//fmt.Println("AAA Getting shard:", s, "  on me:", kv.me, "  unique:", kv.unique, "  gid:", kv.gid)
+				//fmt.Println("shardsGet:", shardsGet)
+				t := kv.GetShard(s, old)
+				time.Sleep(100 * time.Millisecond)
+				kv.mu.Lock()
+				if _, ok := kv.KvS.S[ShardID{gen, s}]; !ok {
+					kv.KvS.S[ShardID{gen, s}] = t
+				}
+				kv.mu.Unlock()
+				atomic.AddInt64(&threadCount, -1)
+				//fmt.Println("AAA Got shard:", s, "  on me:", kv.me, "  unique:", kv.unique, "  gid:", kv.gid)
+				break
+			}
+		}(s)
+	}
+
+	go func() {
+		for {
+			time.Sleep(100 * time.Millisecond)
+			t := atomic.LoadInt64(&threadCount)
+			//fmt.Println("Polling not complete! gen:", gen, " on me:", kv.me, "  unique:", kv.unique, "  gid:", kv.gid, "   t:", t, "\nMap:", kv.KvS.S)
+			if t == 0 {
+				kv.mu.Lock()
+				delete(kv.KvS.ToBePoll, gen)
+				//fmt.Println("Polling complete! gen:", gen, " on me:", kv.me, "  unique:", kv.unique, "  gid:", kv.gid, "\nMap:", kv.KvS.S)
+				kv.mu.Unlock()
+				break
+			}
+		}
+	}()
 }
 
 func calcDiff(old, new shardctrler.Config, self int) ([]int, []int, []int, []int, []int) {
