@@ -68,9 +68,9 @@ type IntSet map[int]mem
 
 type KvStorage struct {
 	//mu              sync.Mutex
-	ShardsAppointed []int
-	AppliedIndex    int
-	S               map[ShardID](ShardState)
+	//ShardsAppointed []int
+	AppliedIndex int
+	S            map[ShardID](ShardState)
 	//OldS            [](map[int](ShardState))
 	/*
 			S               map[int](map[string]string)
@@ -547,103 +547,27 @@ func deepCopy(old map[int]ShardState) map[int]ShardState {
 
 func (kv *ShardKV) applyNewConfig(CFG shardctrler.Config) {
 
-	////fmt.Println("unique:", kv.unique, "  Enter:", CFG, " on me:", kv.me, " applied:", kv.AppliedRPC, "  unique:", kv.unique)
-	////fmt.Println("Print Configuration:", CFG)
-	////fmt.Println("Before Lock :", " on me:", kv.me, "  unique:", kv.unique, "  Lock 10")
 	kv.isInTransfer.Lock()
-	////fmt.Println("After Lock :", " on me:", kv.me, "  unique:", kv.unique, "  Lock 10")
-	/*if len(kv.configs) == len(kv.KvS.OldS) {
-		kv.KvS.OldS = append(kv.KvS.OldS, deepCopy(kv.KvS.S))
-	} else {
-		kv.testConsistency("  F")
-		log.Panicln(len(kv.configs), " != ", len(kv.KvS.OldS), "    unique:", kv.unique)
-	}*/
 
-	shardsAppointed := []int{}
-	shardsNew := []int{}
-	shardsNeedGet := []int{}
-	shardsHave := []int{}
-
-	var CfgOld shardctrler.Config
-
-	for i, v := range CFG.Shards {
-		if v == kv.gid {
-			shardsAppointed = append(shardsAppointed, i)
-		}
-	}
-
-	//The following is evil.Should be corrected later.
-	if len(kv.configs) == 0 {
-		shardsNew = make([]int, len(shardsAppointed))
-		copy(shardsNew, shardsAppointed)
-	} else {
-		CfgOld = kv.configs[len(kv.configs)-1]
-		_, _, shardsHave, shardsNeedGet, shardsNew = calcDiff(CfgOld, CFG, kv.gid)
-		/*for _, shard := range shardsAppointed {
-			switch {
-			case CfgOld.Shards[shard] == 0:
-				shardsNew = append(shardsNew, shard)
-			case CfgOld.Shards[shard] == kv.gid:
-				shardsHave = append(shardsHave, shard)
-			default:
-				shardsNeedGet = append(shardsNeedGet, shard)
-			}
-
-		}*/
-	}
 	kv.configs = append(kv.configs, CFG)
-
-	////fmt.Println("shardsAppointed:", shardsAppointed, "  shardsNew", shardsNew)
-
-	/*for _, v := range shardsNew {
-		kv.KvS.S[ShardID{CFG.Num, v}] = newShardState()
-	}
-
-	for _, v := range shardsHave {
-		kv.KvS.S[ShardID{CFG.Num, v}] = kv.KvS.S[ShardID{CfgOld.Num, v}]
-	}*/
-
-	//kv.KvS.ShardsAppointed = append(kv.KvS.ShardsAppointed, shardsNew...)
-	kv.KvS.ShardsAppointed = append(shardsHave, shardsNew...)
-
-	////fmt.Println("Setting own:", kv.KvS.ShardsAppointed, "  on me:", kv.me, "  unique:", kv.unique, "  gid:", kv.gid, "  Config:", CFG)
 
 	kv.KvS.ToBePoll[CFG.Num] = mem{}
 
-	go kv.getNewShards(len(kv.configs), shardsNeedGet, CfgOld, CFG)
-
-}
-
-func (kv *ShardKV) getNewShards(newIndex int, lt []int, CfgOld shardctrler.Config, CfgNew shardctrler.Config) {
-	/*
-		for _, v := range lt {
-			func(shard int, cfg shardctrler.Config) {
-				t := kv.GetShard(shard, cfg)
-				kv.mu.Lock()
-				kv.KvS.S[ShardID{CfgOld.Num + 1, shard}] = t
+	//go kv.getNewShards(len(kv.configs), shardsNeedGet, CfgOld, CFG)
+	go func() {
+		kv.PollShard(CFG.Num)
+		for {
+			time.Sleep(100 * time.Millisecond)
+			kv.mu.Lock()
+			if _, ok := kv.KvS.ToBePoll[CFG.Num]; !ok {
 				kv.mu.Unlock()
-			}(v, CfgOld)
-		}
-		kv.mu.Lock()
-		kv.KvS.ShardsAppointed = append(kv.KvS.ShardsAppointed, lt...) //make([]int, len(shardsAppointed))
-		kv.isInTransfer.Unlock()
-		kv.mu.Unlock()
-	*/
-
-	kv.PollShard(CfgNew.Num)
-	for {
-		time.Sleep(100 * time.Millisecond)
-		//fmt.Println("Not Finish!", " on me:", kv.me, "  unique:", kv.unique, "  gid:", kv.gid, "  Config:", CfgNew)
-		kv.mu.Lock()
-		if _, ok := kv.KvS.ToBePoll[CfgNew.Num]; !ok {
-			//fmt.Println("Finish!", " on me:", kv.me, "  unique:", kv.unique, "  gid:", kv.gid, "  Config:", CfgNew, "\nMap:", kv.KvS.S)
+				break
+			}
 			kv.mu.Unlock()
-			break
 		}
-		kv.mu.Unlock()
-	}
+		kv.isInTransfer.Unlock()
+	}()
 
-	kv.isInTransfer.Unlock()
 }
 
 func (lt *CallBackList) reg(term int, index int, succeed func(string), fail func(string)) {
