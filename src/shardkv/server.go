@@ -411,7 +411,7 @@ func (kv *ShardKV) installSnapshot(snapshot []byte) {
 			kv.configs = configs
 
 			for i, _ := range kv.KvS.ToBePoll {
-				go kv.PollShard(i)
+				go kv.PollShard(i, true)
 			}
 		}
 	}
@@ -476,7 +476,7 @@ func (kv *ShardKV) applyF() {
 			log.Panic(kv.KvS.AppliedIndex, "+1 != ", a.CommandIndex, "  me:", kv.me)
 		}
 		//fmt.Println("\nCompleting:", op.Id, "type:", op.Type, "   shard:", key2shard(op.Key), " on me:", kv.me, "  index:", a.CommandIndex, " applied:", kv.KvS.S, "  unique:", kv.unique, "\n  gid:", kv.gid, "  gen:", len(kv.configs)-1)
-		fmt.Println("\nCompleting:", op.Id, "type:", op.Type, "   shard:", key2shard(op.Key), " on me:", kv.me, "  unique:", kv.unique, "\n  gid:", kv.gid, "  gen:", len(kv.configs)-1)
+		//fmt.Println("\nCompleting:", op.Id, "type:", op.Type, "   shard:", key2shard(op.Key), " on me:", kv.me, "  unique:", kv.unique, "\n  gid:", kv.gid, "  gen:", len(kv.configs)-1)
 		kv.KvS.AppliedIndex = a.CommandIndex
 		if op.CfgGen != len(kv.configs)-1 {
 			//fmt.Println("Outdated.Skip", op.Id, "   shard:", key2shard(op.Key), " on me:", kv.me, "  index:", a.CommandIndex, "  unique:", kv.unique, "  gid:", kv.gid)
@@ -490,6 +490,10 @@ func (kv *ShardKV) applyF() {
 		if ((op.Type == GetF || op.Type == PutF || op.Type == AppendF) && op.Id.RpcSeq > kv.KvS.S[ShardID{curGen, key2shard(op.Key)}].AppliedRPC[op.Id.ClientId]) ||
 			(op.Type == SetConfig && op.Id.RpcSeq > int64(kv.KvS.CurrentConfig)) ||
 			(op.Type == AddShard && kv.KvS.ShardGen[op.SID.ShardNum] < int64(op.SID.Gen)) {
+
+			if _, ok := kv.KvS.S[ShardID{curGen, key2shard(op.Key)}]; (op.Type == GetF || op.Type == PutF || op.Type == AppendF) && !ok {
+				log.Panicln("\nCompleting:", op.Id, "type:", op.Type, "   shard:", key2shard(op.Key), " on me:", kv.me, "  index:", a.CommandIndex, " applied:", kv.KvS.S, "  unique:", kv.unique, "\n  gid:", kv.gid, "  gen:", len(kv.configs)-1)
+			}
 			//if true {
 			switch op.Type {
 			case GetF:
@@ -568,8 +572,9 @@ func (kv *ShardKV) applyNewConfig(CFG shardctrler.Config) {
 	kv.KvS.ToBePoll[CFG.Num] = mem{}
 
 	//go kv.getNewShards(len(kv.configs), shardsNeedGet, CfgOld, CFG)
+	kv.PollShard(CFG.Num, false)
 	go func() {
-		kv.PollShard(CFG.Num)
+		//kv.PollShard(CFG.Num)
 		for {
 			time.Sleep(10 * time.Millisecond)
 			kv.mu.Lock()
@@ -673,24 +678,27 @@ func (kv *ShardKV) CheckAvailable(shard int) bool {
 	return ok
 }
 
-func (kv *ShardKV) PollShard(gen int) {
+func (kv *ShardKV) PollShard(gen int, isAsync bool) {
 	var old shardctrler.Config
 	var new shardctrler.Config
 	oldGen := gen - 1
 
-	kv.mu.Lock()
+	if isAsync {
+		kv.mu.Lock()
+	}
+
 	gid := kv.gid
 	if gen != 0 {
 		old = kv.configs[gen-1]
 	}
 	new = kv.configs[gen]
-	kv.mu.Unlock()
+	//kv.mu.Unlock()
 
 	shardsDeleted, shardsMoved, shardsStay, shardsGet, shardsNew := calcDiff(old, new, gid)
 
 	func(a []int) {}(shardsMoved)
 
-	kv.mu.Lock()
+	//kv.mu.Lock()
 	curGen := len(kv.configs) - 1
 	for _, s := range shardsDeleted {
 		if _, ok := kv.KvS.S[ShardID{oldGen, s}]; ok {
@@ -705,7 +713,9 @@ func (kv *ShardKV) PollShard(gen int) {
 			kv.KvS.ShardGen[s] = int64(curGen)
 		}
 	}
-	kv.mu.Unlock()
+	if isAsync {
+		kv.mu.Unlock()
+	}
 
 	var threadCount int64 = 0
 
@@ -826,7 +836,7 @@ func (kv *ShardKV) calcOwner() map[ShardID]int {
 
 func (kv *ShardKV) autoGC() {
 	for {
-		ms := 50
+		ms := 20
 		time.Sleep(time.Duration(ms) * time.Millisecond)
 		ownerMap := kv.calcOwner()
 		kv.mu.Lock()
