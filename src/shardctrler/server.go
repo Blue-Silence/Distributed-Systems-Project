@@ -1,7 +1,6 @@
 package shardctrler
 
 import (
-	"fmt"
 	"log"
 	"runtime/debug"
 	"sort"
@@ -471,7 +470,7 @@ func rebalance(old Config) Config {
 		lt = append(lt, v)
 	}
 	sort.Sort(ByGIP(lt))
-	fmt.Println("1  lt:", lt)
+
 	for i, v := range lt {
 		for len(v.shards) < numPerG && len(freed) > 0 {
 			v.shards = append(v.shards, freed[0])
@@ -479,7 +478,7 @@ func rebalance(old Config) Config {
 			lt[i] = v
 		}
 	}
-	//fmt.Println("2  lt:", lt)
+
 	for i, v := range lt {
 		for len(freed) > 0 {
 			v.shards = append(v.shards, freed[0])
@@ -487,7 +486,7 @@ func rebalance(old Config) Config {
 			lt[i] = v
 		}
 	}
-	//fmt.Println("3  lt:", lt)
+
 	for _, v := range lt {
 		for _, v1 := range v.shards {
 			new.Shards[v1] = v.GIP
@@ -508,46 +507,6 @@ func (sc *ShardCtrler) joinAction(op Op) {
 		newCount++
 	}
 	newConfig = rebalance(newConfig)
-	/*
-		shardPerG := len(newConfig.Shards) / len(newConfig.Groups)
-		fmt.Println("For any group, num:", shardPerG)
-
-		shardsD := []int{}
-		{
-			count := 0
-			m := config2Map(newConfig)
-			for {
-				if count == shardPerG*newCount {
-					break
-				}
-				for i, v := range m {
-					//log.Println("Emmmm Beeping!")
-					if count == shardPerG*newCount {
-						break
-					}
-					if len(v) > 0 {
-						fmt.Println("appending;", v[0], "  from:", v)
-						shardsD = append(shardsD, v[0])
-						//v = v[1:]
-						m[i] = v[1:]
-						count++
-					}
-				}
-			}
-		}
-		fmt.Println("shardsD:", shardsD)
-		fmt.Println("newConfigBefore:", newConfig)
-		distributeShard(op.JoinServers, shardsD, newConfig.Shards[:], shardPerG)
-
-		shardsD = []int{}
-		for i, v := range newConfig.Shards {
-			if v == 0 {
-				shardsD = append(shardsD, i)
-			}
-		}
-		distributeShard(op.JoinServers, shardsD, newConfig.Shards[:], 1)
-
-		fmt.Println("newConfig:", newConfig)*/
 	sc.configs = append(sc.configs, newConfig)
 }
 
