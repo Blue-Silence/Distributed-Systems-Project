@@ -55,8 +55,7 @@ type ShardKV struct {
 
 	callbackLt CallBackList
 	KvS        KvStorage
-	//AppliedRPC map[int64]int64
-	persister *raft.Persister
+	persister  *raft.Persister
 
 	configs      []shardctrler.Config
 	isInTransfer sync.Mutex
@@ -147,12 +146,10 @@ func (kv *ShardKV) Get(args *GetArgs, reply *GetReply) {
 		func(re string) {
 			reply.Value = re
 			reply.Err = OK
-			////fmt.Println("Exec succeed:", args)
 			finished.Unlock()
 		},
 		func(re string) {
 			reply.Err = ErrWrongLeader //Err("Exec fail")
-			////fmt.Println("Exec fail:", args)
 			finished.Unlock()
 		},
 	)
@@ -167,14 +164,11 @@ func (kv *ShardKV) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 	if !kv.CheckAvailable(key2shard(args.Key)) {
 
 		reply.Err = ErrWrongGroup
-		//cfg := len(kv.configs) - 1
-		//fmt.Println("Missing:", key2shard(args.Key), " cfg:", cfg, " on me:", kv.me, "  gid:", kv.gid, "  unique:", kv.unique)
 		kv.mu.Unlock()
 		return
 	}
 	cfgGen := len(kv.configs) - 1
 	kv.mu.Unlock()
-	////fmt.Println("777")
 
 	index := 0
 	term := 0
@@ -191,12 +185,8 @@ func (kv *ShardKV) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 
 	if !isLeader {
 		reply.Err = ErrWrongLeader
-		////fmt.Println("888")
 		return
 	}
-
-	////fmt.Println("Started:", args, " on me:", kv.me, "  index:", index, "  unique:", kv.unique)
-	////////fmt.Println("999")
 
 	var finished sync.Mutex
 	finished.Lock()
@@ -210,7 +200,6 @@ func (kv *ShardKV) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 		},
 		func(re string) {
 			reply.Err = ErrWrongLeader //Err("Exec fail")
-			////fmt.Println("Exec fail:", args)
 			finished.Unlock()
 		},
 	)
@@ -395,22 +384,18 @@ func (kv *ShardKV) applyF() {
 		op, ok := a.Command.(Op)
 
 		if !ok {
-			//////////fmt.Println("Warning!")
 			continue
 		}
 
 		re := ""
-		////////fmt.Println("Before Lock :", " on me:", kv.me, "  unique:", kv.unique, "  Lock 8")
+
 		kv.mu.Lock()
-		////////fmt.Println("After Lock :", " on me:", kv.me, "  unique:", kv.unique, "  Lock 8")
+
 		if kv.KvS.AppliedIndex+1 != a.CommandIndex && kv.KvS.AppliedIndex != -1 {
 			log.Panic(kv.KvS.AppliedIndex, "+1 != ", a.CommandIndex, "  me:", kv.me)
 		}
-		////fmt.Println("\nCompleting:", op.Id, "type:", op.Type, "   shard:", key2shard(op.Key), " on me:", kv.me, "  index:", a.CommandIndex, " applied:", kv.KvS.S, "  unique:", kv.unique, "\n  gid:", kv.gid, "  gen:", len(kv.configs)-1)
-		////fmt.Println("\nCompleting:", op.Id, "type:", op.Type, "   shard:", key2shard(op.Key), " on me:", kv.me, "  unique:", kv.unique, "\n  gid:", kv.gid, "  gen:", len(kv.configs)-1)
 		kv.KvS.AppliedIndex = a.CommandIndex
 		if op.CfgGen != len(kv.configs)-1 {
-			////fmt.Println("Outdated.Skip", op.Id, "   shard:", key2shard(op.Key), " on me:", kv.me, "  index:", a.CommandIndex, "  unique:", kv.unique, "  gid:", kv.gid)
 			term, _ := kv.rf.GetState()
 			_, fail := kv.callbackLt.popF(term, a.CommandIndex)
 			fail("")
@@ -475,8 +460,6 @@ func deepCopy(old map[int]ShardState) map[int]ShardState {
 }
 
 func (kv *ShardKV) applyNewConfig(CFG shardctrler.Config) {
-
-	//kv.isInTransfer.Lock()
 
 	kv.configs = append(kv.configs, CFG)
 
@@ -761,7 +744,6 @@ func (kv *ShardKV) GC() {
 }
 
 func (kv *ShardKV) CheckOwner(ownerGid int, shard int, allServer map[int][]string) (int, bool) {
-	//return -1, true
 	for {
 		args := CheckOwnerArgs{shard}
 		gid := ownerGid
