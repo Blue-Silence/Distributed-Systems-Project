@@ -57,8 +57,7 @@ type ShardKV struct {
 	KvS        KvStorage
 	persister  *raft.Persister
 
-	configs      []shardctrler.Config
-	isInTransfer sync.Mutex
+	configs []shardctrler.Config
 
 	mck *shardctrler.Clerk
 
@@ -74,6 +73,14 @@ type KvStorage struct {
 	CurrentConfig int64
 	ToBePoll      IntSet
 	ShardGen      map[int]int64
+}
+
+func (k *KvStorage) Init() {
+	k.S = make(map[ShardID]ShardState)
+	k.AppliedIndex = -1
+	k.CurrentConfig = -1
+	k.ToBePoll = make(IntSet)
+	k.ShardGen = make(map[int]int64)
 }
 
 type ShardState struct {
@@ -265,11 +272,7 @@ func StartServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persister,
 
 	// My initialization code here.
 	kv.callbackLt.callbackLt = make(map[ActId]CallBackTuple)
-	kv.KvS.S = make(map[ShardID]ShardState)
-	kv.KvS.AppliedIndex = -1
-	kv.KvS.CurrentConfig = -1
-	kv.KvS.ToBePoll = make(IntSet)
-	kv.KvS.ShardGen = make(map[int]int64)
+	kv.KvS.Init()
 
 	kv.unique = nrand()
 	kv.persister = persister
