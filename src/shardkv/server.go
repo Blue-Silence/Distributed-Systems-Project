@@ -58,7 +58,6 @@ type ShardKV struct {
 	KvS        KvStorage
 	persister  *raft.Persister
 
-	//configs []shardctrler.Config
 	configs Configs
 
 	mck *shardctrler.Clerk
